@@ -1,4 +1,4 @@
-.PHONY: help vm-start vm-stop vm-status vm-ssh k3s-start k3s-stop k3s-status argocd-install argocd-status argocd-password argocd-ui
+.PHONY: help vm-start vm-stop vm-status vm-ssh k3s-start k3s-stop k3s-status argocd-install argocd-status argocd-password argocd-ui kargo-install kargo-status kargo-password
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -35,3 +35,12 @@ argocd-password: ## Print the Argo CD initial admin password
 
 argocd-ui: ## Open the Argo CD UI in the browser
 	@scripts/argocd-ui.sh
+
+kargo-install: ## Install Kargo into K3s (idempotent, UI on NodePort 30090)
+	@scripts/kargo-install.sh
+
+kargo-status: ## Show Kargo status and UI address
+	@scripts/kargo-status.sh
+
+kargo-password: ## Print the Kargo admin account password
+	@scripts/kargo-password.sh

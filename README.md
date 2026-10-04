@@ -11,7 +11,7 @@ A local DevOps/cloud-native learning lab running on an Apple Silicon Mac (M2 Max
 | **Docker** | Native macOS | Container runtime (used only where appropriate) |
 | **LocalStack** | Docker | Local AWS service emulation |
 | **Argo CD** | K3s | GitOps continuous delivery |
-| **Kargo** | K3s | Progressive delivery |
+| **Kargo** | K3s | GitOps promotion orchestration (dev → staging) |
 | **Prometheus** | K3s | Metrics collection |
 | **Grafana** | K3s | Observability dashboards |
 | **Loki** | K3s | Log aggregation |
@@ -133,6 +133,28 @@ make argocd-ui
 
 See [docs/argocd.md](docs/argocd.md) for full documentation.
 
+### Kargo
+
+Kargo is installed in the K3s cluster (namespace `kargo`) from the official
+Helm chart, together with its `cert-manager` prerequisite. It is the
+**promotion** layer that decides which version belongs in which environment;
+Argo CD still does the deploying. The UI/API is exposed on NodePort 30090 →
+`https://localhost:30090` (username `admin`).
+
+```sh
+# Install / re-run (idempotent; also installs cert-manager if missing)
+make kargo-install
+
+# Pods, workloads, services, CRDs, Helm release, cert-manager
+make kargo-status
+
+# Admin password (stored in the gitignored secrets/ directory)
+make kargo-password
+```
+
+No `Project`/`Stage`/`Warehouse` objects exist yet — promotion workflows come
+in a later step. See [docs/kargo.md](docs/kargo.md) for full documentation.
+
 ## Prerequisites
 
 - Apple Silicon Mac (M2 Max, 32 GB RAM)
@@ -142,7 +164,7 @@ See [docs/argocd.md](docs/argocd.md) for full documentation.
 - [ ] Ollama
 - [ ] LocalStack
 - [x] Argo CD (GitOps CD — see `docs/argocd.md`)
-- [ ] Kargo
+- [x] Kargo (GitOps promotion — see `docs/kargo.md`)
 - [ ] Prometheus / Grafana / Loki
 
 ## License
