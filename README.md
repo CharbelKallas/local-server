@@ -111,6 +111,28 @@ kubectl get pods -A
 
 See [docs/k3s.md](docs/k3s.md) for full documentation.
 
+### Argo CD
+
+Argo CD is installed in the K3s cluster (namespace `argocd`) from the
+official stable manifests. The UI is exposed on NodePort 30080, forwarded
+by Lima to `https://localhost:30080` on the Mac (no ingress controller).
+
+```sh
+# Install / re-run (idempotent)
+make argocd-install
+
+# Pods + services + UI address
+make argocd-status
+
+# Initial admin password (username: admin)
+make argocd-password
+
+# Open the UI in the browser
+make argocd-ui
+```
+
+See [docs/argocd.md](docs/argocd.md) for full documentation.
+
 ## Prerequisites
 
 - Apple Silicon Mac (M2 Max, 32 GB RAM)
@@ -119,7 +141,7 @@ See [docs/k3s.md](docs/k3s.md) for full documentation.
 - [ ] Docker Desktop or Colima
 - [ ] Ollama
 - [ ] LocalStack
-- [ ] Argo CD
+- [x] Argo CD (GitOps CD — see `docs/argocd.md`)
 - [ ] Kargo
 - [ ] Prometheus / Grafana / Loki
 
