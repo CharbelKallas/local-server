@@ -1,0 +1,18 @@
+# Persistent storage for PostgreSQL.
+# storageClassName "local-path" is the K3s default storage class
+# (local-path-provisioner): it creates a directory on the VM disk and
+# binds it to this claim. Deleting the claim deletes the data.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: databases
+  labels:
+    app: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi

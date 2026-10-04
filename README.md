@@ -12,6 +12,9 @@ A local DevOps/cloud-native learning lab running on an Apple Silicon Mac (M2 Max
 | **LocalStack** | Docker | Local AWS service emulation |
 | **Argo CD** | K3s | GitOps continuous delivery |
 | **Kargo** | K3s | GitOps promotion orchestration (dev → staging) |
+| **PostgreSQL** | K3s | Relational database (SQL) — manifests prepared, not deployed |
+| **MongoDB** | K3s | Document database (JSON) — manifests prepared, not deployed |
+| **Redis** | K3s | Cache / key-value store — manifests prepared, not deployed |
 | **Prometheus** | K3s | Metrics collection |
 | **Grafana** | K3s | Observability dashboards |
 | **Loki** | K3s | Log aggregation |
@@ -24,6 +27,7 @@ local-server/
 ├── Makefile
 ├── .gitignore
 ├── vm/               # Linux VM configuration (Lima)
+├── kubernetes/       # Kubernetes manifests (databases/)
 ├── scripts/          # Automation and utility scripts
 └── docs/             # Documentation
 ```
@@ -155,6 +159,29 @@ make kargo-password
 No `Project`/`Stage`/`Warehouse` objects exist yet — promotion workflows come
 in a later step. See [docs/kargo.md](docs/kargo.md) for full documentation.
 
+### Databases
+
+Kubernetes manifests for **PostgreSQL**, **MongoDB** and **Redis** are
+prepared under [`kubernetes/databases/`](kubernetes/databases/) — one
+shared namespace (`databases`), and per database a Deployment (1 replica),
+a ClusterIP Service, and a 1 Gi PersistentVolumeClaim on the K3s
+`local-path` storage class. They are **configuration only: nothing has
+been applied, installed, or started yet.**
+
+```sh
+# When deployment is wanted (cluster must be running):
+kubectl apply -f kubernetes/databases/namespace.yaml
+kubectl apply -R -f kubernetes/databases/
+
+# Verify
+kubectl get deploy,svc,pvc -n databases
+```
+
+Ports: PostgreSQL `postgres:5432`, MongoDB `mongodb:27017`, Redis
+`redis:6379` (all ClusterIP, in-cluster only). See
+[docs/databases.md](docs/databases.md) for usage, deployment details, and
+how persistent storage works.
+
 ## Prerequisites
 
 - Apple Silicon Mac (M2 Max, 32 GB RAM)
@@ -165,6 +192,7 @@ in a later step. See [docs/kargo.md](docs/kargo.md) for full documentation.
 - [ ] LocalStack
 - [x] Argo CD (GitOps CD — see `docs/argocd.md`)
 - [x] Kargo (GitOps promotion — see `docs/kargo.md`)
+- [ ] Databases: PostgreSQL / MongoDB / Redis (manifests ready, not deployed — see `docs/databases.md`)
 - [ ] Prometheus / Grafana / Loki
 
 ## License

@@ -1,0 +1,18 @@
+# Persistent storage for Redis.
+# Append-only file (AOF) persistence is enabled in the Deployment, so
+# the /data directory must survive pod restarts. Same K3s local-path
+# StorageClass as the other databases.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: databases
+  labels:
+    app: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi

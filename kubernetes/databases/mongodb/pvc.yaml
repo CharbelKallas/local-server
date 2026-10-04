@@ -1,0 +1,17 @@
+# Persistent storage for MongoDB.
+# Same K3s local-path StorageClass as PostgreSQL: data is stored in a
+# directory on the VM disk. Deleting the claim deletes the data.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-data
+  namespace: databases
+  labels:
+    app: mongodb
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi

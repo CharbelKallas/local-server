@@ -1,0 +1,17 @@
+# PostgreSQL Service — ClusterIP only (in-cluster access).
+# Address inside the cluster: postgres.databases.svc.cluster.local:5432
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: databases
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

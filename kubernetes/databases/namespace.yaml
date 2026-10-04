@@ -1,0 +1,10 @@
+# Single shared namespace for all lab databases.
+# One namespace keeps the setup simple: PostgreSQL, MongoDB and Redis
+# live side by side and can talk to each other without cross-namespace
+# service DNS.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: databases
+  labels:
+    app.kubernetes.io/part-of: local-devops-lab
