@@ -1,0 +1,53 @@
+# Lima VM definition for the local K3s cluster.
+# Docs: https://lima-vm.io/
+#
+# Why Lima: free, open-source, scriptable, and runs Linux VMs on Apple Silicon
+# with Apple's Virtualization.framework (fast, low overhead). UTM is the GUI
+# alternative; Lima is easier to automate.
+#
+# The instance is named "k3s" (the file name becomes the Lima instance name).
+# Manage it with:  make vm-start | vm-stop | vm-status | vm-ssh
+# Or create it manually with:  limactl start --name=k3s vm/k3s.yaml
+
+vmType: vz
+mountType: virtiofs
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+# Conservative resource budget for an M2 Max with 32 GB RAM.
+cpus: 4
+memory: "6GiB"
+disk: "40GiB"
+
+# No shared mounts: the VM only runs K3s and nothing needs host files.
+mounts: []
+
+# Port forwarding: Lima automatically forwards every port the
+# guest listens on to 127.0.0.1 on macOS. The rules below make
+# the important ones explicit:
+#   - 6443: the K3s API server (kubectl talks to it via the kubeconfig)
+#   - 30000-32767: the NodePort range (Argo CD, Kargo, Grafana, apps, ...)
+portForwards:
+  - guestPort: 6443
+    hostPort: 6443
+  - guestPortRange: [30000, 32767]
+    hostPortRange: [30000, 32767]
+
+# K3s uses its own container runtime (containerd); Lima's is not needed.
+containerd:
+  system: false
+  user: false
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/sh
+      set -eux
+      # Make sure the macOS host is resolvable as host.lima.internal from the
+      # VM. Modern Lima does this automatically; this is a safety net.
+      if ! getent hosts host.lima.internal >/dev/null 2>&1; then
+        gw="$(ip route | awk '/default/ {print $3; exit}')"
+        [ -n "$gw" ] && echo "$gw host.lima.internal" >> /etc/hosts
+      fi

@@ -23,9 +23,31 @@ local-server/
 ├── README.md
 ├── Makefile
 ├── .gitignore
+├── vm/               # Linux VM configuration (Lima)
 ├── scripts/          # Automation and utility scripts
 └── docs/             # Documentation
 ```
+
+## Why a Linux VM Is Needed
+
+K3s is a Linux-only Kubernetes distribution. It needs a real Linux kernel for
+cgroups, network namespaces, iptables, and other kernel features that macOS
+does not provide. A Linux VM gives us a genuine Linux environment on the Mac,
+which is required for K3s and the tools that will run on top of it.
+
+## How the VM Works
+
+The VM is managed by [Lima](https://lima-vm.io/) (Linux virtual Machines),
+a free, open-source tool that runs Linux VMs on macOS using Apple's
+Virtualization.framework. It is lightweight, scriptable, and already
+installed on this machine.
+
+- **Instance name:** `k3s` (matches its purpose — it will run K3s)
+- **OS:** Ubuntu 24.04 Server (arm64)
+- **Resources:** 4 CPUs, 6 GiB RAM, 40 GiB disk (conservative for a 32 GB host)
+- **Port forwarding:** guest ports 6443 (K3s API) and 30000–32767 (NodePort
+  range) are forwarded to the same ports on the macOS host
+- **Configuration file:** `vm/k3s.yaml`
 
 ## Getting Started
 
@@ -33,10 +55,44 @@ This repository is a foundation. Components will be added incrementally.
 
 Run `make help` to see available commands.
 
+### Start the VM
+
+```sh
+make vm-start
+```
+
+On first run this creates the VM from `vm/k3s.yaml` (downloads the Ubuntu
+cloud image, may take a few minutes). On later runs it simply starts the
+existing VM.
+
+### Stop the VM
+
+```sh
+make vm-stop
+```
+
+### Check VM status
+
+```sh
+make vm-status
+```
+
+### Connect to the VM
+
+```sh
+make vm-ssh
+```
+
+This opens an interactive shell on the VM. You can also run one-off commands:
+
+```sh
+scripts/vm-ssh.sh "uname -a"
+```
+
 ## Prerequisites
 
 - Apple Silicon Mac (M2 Max, 32 GB RAM)
-- [ ] Linux VM for K3s
+- [x] Linux VM for K3s (Lima — see `vm/k3s.yaml`)
 - [ ] Docker Desktop or Colima
 - [ ] Ollama
 - [ ] LocalStack
