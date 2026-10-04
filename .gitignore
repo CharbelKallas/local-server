@@ -1,0 +1,46 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Secrets
+*.pem
+*.key
+secrets/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+
+# LocalStack
+.localstack/
+
+# Ollama
+ollama/
+
+# Logs
+*.log
+logs/
+
+# Build artifacts
+dist/
+build/
+tmp/
