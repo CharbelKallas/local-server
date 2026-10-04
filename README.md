@@ -89,10 +89,33 @@ This opens an interactive shell on the VM. You can also run one-off commands:
 scripts/vm-ssh.sh "uname -a"
 ```
 
+### K3s Cluster
+
+K3s is already installed and running inside the VM. The Mac's `kubectl`
+connects to it via Lima's port forwarding (guest 6443 → host 127.0.0.1:6443).
+
+```sh
+# Check cluster status
+make k3s-status
+
+# Start K3s (if not running)
+make k3s-start
+
+# Stop K3s
+make k3s-stop
+
+# Verify kubectl works
+kubectl get nodes
+kubectl get pods -A
+```
+
+See [docs/k3s.md](docs/k3s.md) for full documentation.
+
 ## Prerequisites
 
 - Apple Silicon Mac (M2 Max, 32 GB RAM)
 - [x] Linux VM for K3s (Lima — see `vm/k3s.yaml`)
+- [x] K3s (lightweight Kubernetes — see `docs/k3s.md`)
 - [ ] Docker Desktop or Colima
 - [ ] Ollama
 - [ ] LocalStack
