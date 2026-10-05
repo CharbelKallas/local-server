@@ -8,11 +8,13 @@
 # syncs that path into the cluster — Kargo itself never touches the
 # cluster.
 #
-# PLACEHOLDERS (replace before applying — must match warehouse.yaml and
+# PLACEHOLDER (replace before applying — must match warehouse.yaml and
 # kubernetes/argocd/applications/hello-devops-dev.yaml):
-#   <HELLO_DEVOPS_GIT_REPOSITORY_URL>     clone URL of hello-devops
-#   <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>  branch holding the env paths
 #   <LOCAL_REGISTRY_URL>                  base address of the local registry
+#
+# Already resolved (kept identical to the Argo CD Application):
+#   appRepoURL = https://github.com/CharbelKallas/hello-devops.git
+#   appBranch  = master
 #
 # Status: configuration only — not applied to the cluster.
 apiVersion: kargo.akuity.io/v1alpha1
@@ -23,9 +25,9 @@ metadata:
 spec:
   vars:
     - name: appRepoURL
-      value: <HELLO_DEVOPS_GIT_REPOSITORY_URL>
+      value: https://github.com/CharbelKallas/hello-devops.git
     - name: appBranch
-      value: <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>
+      value: master
     - name: imageRepo
       value: <LOCAL_REGISTRY_URL>/hello-devops
   requestedFreight:

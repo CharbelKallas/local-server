@@ -11,9 +11,11 @@
 # digest to <repo>:dev/ and this Application's automated sync applies it
 # to the cluster. Kargo never touches the cluster itself.
 #
-# PLACEHOLDERS (replace before applying):
-#   <HELLO_DEVOPS_GIT_REPOSITORY_URL>     clone URL of hello-devops
-#   <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>  branch to deploy (e.g. main)
+# RESOLVED — no placeholders remain in this file:
+#   repoURL         https://github.com/CharbelKallas/hello-devops.git
+#   targetRevision  master (the branch holding the dev/ and staging/ paths)
+# The remaining infrastructure placeholder <LOCAL_REGISTRY_URL> lives in
+# kubernetes/kargo/ and in the application's base/deployment.yaml.
 #
 # Status: configuration only — not applied to the cluster.
 apiVersion: argoproj.io/v1alpha1
@@ -26,8 +28,8 @@ spec:
   # AppProject can be introduced later if source/destination scoping is wanted.
   project: default
   source:
-    repoURL: <HELLO_DEVOPS_GIT_REPOSITORY_URL>
-    targetRevision: <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>
+    repoURL: https://github.com/CharbelKallas/hello-devops.git
+    targetRevision: master
     path: dev
   destination:
     server: https://kubernetes.default.svc

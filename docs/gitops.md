@@ -133,13 +133,20 @@ repository never contains application code.
 | Placeholder | Meaning | Files |
 |---|---|---|
 | `<HELLO_DEVOPS_GIT_REPOSITORY_URL>` | Clone URL of the future `hello-devops` repository | both files in `kubernetes/argocd/applications/`, `stage-dev.yaml`, `stage-staging.yaml` |
-| `<HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>` | Branch holding the `dev/` and `staging/` paths (commonly `main`) | same four files |
+| `<HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>` | Branch holding the `dev/` and `staging/` paths (commonly `main`; `hello-devops` uses `master`) | same four files |
 | `<LOCAL_REGISTRY_URL>` | Base address of the local container registry, including port, no trailing slash (example form: `localhost:5000`) | `warehouse.yaml`, `stage-dev.yaml`, `stage-staging.yaml` |
 
 The three values must be kept consistent: `imageRepo` in both Stage files
 must match the Warehouse's image `repoURL` exactly (Kargo resolves the
 Freight image by repository URL), and the repository URL/branch in the
 Stage files must match the Argo CD Applications.
+
+**Replacement status:** the repository URL and branch are now resolved
+in all four files
+(`https://github.com/CharbelKallas/hello-devops.git`, branch `master`).
+Only `<LOCAL_REGISTRY_URL>` remains to be replaced — here in
+`warehouse.yaml`, `stage-dev.yaml`, `stage-staging.yaml`, and in the
+application repository (`base/deployment.yaml`, `dev/`, `staging/`).
 
 ## Expected Shape of the Future `hello-devops` Repository
 

@@ -34,7 +34,7 @@ spec:
     # for now to keep Freight flow image-driven — Kargo's own promotion
     # commits would otherwise churn Freight as well.
     # - git:
-    #     repoURL: <HELLO_DEVOPS_GIT_REPOSITORY_URL>
-    #     branch: <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>
+    #     repoURL: https://github.com/CharbelKallas/hello-devops.git
+    #     branch: master
     #     includePaths:
     #       - src
