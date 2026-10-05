@@ -1,0 +1,40 @@
+# Kargo Warehouse for "hello-devops": watches the LOCAL container
+# registry for new image builds produced by the external application
+# repository's CI (GitHub Actions). A newly discovered image becomes a
+# piece of Freight that can then be promoted dev -> staging.
+#
+# PLACEHOLDERS (replace before applying):
+#   <LOCAL_REGISTRY_URL>  base address of the local container registry,
+#                         including port if any, no trailing slash
+#                         (e.g. localhost:5000).
+#
+# Deliberately local: no ECR, no AWS, no LocalStack — only the
+# lab's own container registry (which does not exist yet either).
+#
+# Status: configuration only — not applied to the cluster.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: hello-devops
+  namespace: hello-devops   # the namespace created by Project hello-devops
+spec:
+  subscriptions:
+    # The container image produced by the hello-devops repository's CI.
+    # Contract: GitHub Actions pushes <LOCAL_REGISTRY_URL>/hello-devops:latest
+    # on every build. The "Digest" strategy makes Kargo record the digest
+    # behind that mutable tag in each piece of Freight, so promotions are
+    # pinned to an immutable reference.
+    - image:
+        repoURL: <LOCAL_REGISTRY_URL>/hello-devops
+        imageSelectionStrategy: Digest
+        constraint: latest
+
+    # Optional (not enabled): subscribe to the application repository's
+    # Git history too, so manifest commits also produce Freight. Left out
+    # for now to keep Freight flow image-driven — Kargo's own promotion
+    # commits would otherwise churn Freight as well.
+    # - git:
+    #     repoURL: <HELLO_DEVOPS_GIT_REPOSITORY_URL>
+    #     branch: <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>
+    #     includePaths:
+    #       - src

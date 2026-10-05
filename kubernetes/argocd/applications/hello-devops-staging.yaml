@@ -1,0 +1,34 @@
+# Argo CD Application for the EXTERNAL application repository
+# "hello-devops" — environment: staging.
+#
+# Sibling of hello-devops-dev.yaml: same repository, different path
+# ("staging" instead of "dev") and different target namespace. Kargo
+# commits the promoted image digest to <repo>:staging/ when Freight is
+# promoted into the staging Stage; Argo CD's automated sync applies it.
+#
+# PLACEHOLDERS (replace before applying):
+#   <HELLO_DEVOPS_GIT_REPOSITORY_URL>     clone URL of hello-devops
+#   <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>  branch to deploy (e.g. main)
+#
+# Status: configuration only — not applied to the cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-devops-staging
+  namespace: argocd   # Argo CD only discovers Applications in its own namespace
+spec:
+  # Built-in "default" AppProject (unrestricted in this lab).
+  project: default
+  source:
+    repoURL: <HELLO_DEVOPS_GIT_REPOSITORY_URL>
+    targetRevision: <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>
+    path: staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hello-devops-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

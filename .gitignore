@@ -30,9 +30,6 @@ secrets/
 kubeconfig
 *.kubeconfig
 
-# LocalStack
-.localstack/
-
 # Ollama
 ollama/
 

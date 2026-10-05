@@ -1,0 +1,67 @@
+# Kargo Stage "staging" — second promotion target for the external
+# application repository hello-devops.
+#
+# Identical promotion steps to Stage "dev" (see stage-dev.yaml), except:
+#   - Freight is obtained only AFTER it has been promoted into "dev"
+#     (dev -> staging flow), and
+#   - the overlay it writes is "staging" instead of "dev".
+#
+# Promotion into this Stage is a manual action (Kargo UI / CLI /
+# Promotion resource) until auto-promotion is enabled at the
+# ProjectConfig level — which is deliberately not done yet.
+#
+# PLACEHOLDERS (replace before applying — must match warehouse.yaml and
+# kubernetes/argocd/applications/hello-devops-staging.yaml):
+#   <HELLO_DEVOPS_GIT_REPOSITORY_URL>     clone URL of hello-devops
+#   <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>  branch holding the env paths
+#   <LOCAL_REGISTRY_URL>                  base address of the local registry
+#
+# Status: configuration only — not applied to the cluster.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: staging
+  namespace: hello-devops   # the namespace created by Project hello-devops
+spec:
+  vars:
+    - name: appRepoURL
+      value: <HELLO_DEVOPS_GIT_REPOSITORY_URL>
+    - name: appBranch
+      value: <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>
+    - name: imageRepo
+      value: <LOCAL_REGISTRY_URL>/hello-devops
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: hello-devops
+      sources:
+        stages:
+          - dev   # staging only accepts Freight that already ran in dev
+  promotionTemplate:
+    spec:
+      steps:
+        # 1. Check out the external application repository.
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.appRepoURL }}
+            checkout:
+              - branch: ${{ vars.appBranch }}
+                path: ./src
+        # 2. Rewrite the staging overlay to the image digest being promoted.
+        - uses: kustomize-set-image
+          as: update-image
+          config:
+            path: ./src/staging
+            images:
+              - image: ${{ vars.imageRepo }}
+                digest: ${{ imageFrom(vars.imageRepo).Digest }}
+        # 3. Commit the overlay change with a descriptive message.
+        - uses: git-commit
+          config:
+            path: ./src
+            message: ${{ outputs['update-image'].commitMessage }}
+        # 4. Push back to the same branch. Argo CD's automated sync picks
+        #    up the commit and applies it to the cluster.
+        - uses: git-push
+          config:
+            path: ./src

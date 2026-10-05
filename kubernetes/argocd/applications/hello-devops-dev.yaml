@@ -1,0 +1,40 @@
+# Argo CD Application for the EXTERNAL application repository
+# "hello-devops" — environment: dev.
+#
+# This is infrastructure-level GitOps configuration: this repository
+# decides WHICH external repository/path Argo CD deploys, but contains
+# no application code and no application manifests — those live in the
+# hello-devops repository itself (expected layout: a Kustomize overlay
+# at path "dev"; see docs/gitops.md for the full contract).
+#
+# When Kargo promotes a new image into the dev Stage, it commits the new
+# digest to <repo>:dev/ and this Application's automated sync applies it
+# to the cluster. Kargo never touches the cluster itself.
+#
+# PLACEHOLDERS (replace before applying):
+#   <HELLO_DEVOPS_GIT_REPOSITORY_URL>     clone URL of hello-devops
+#   <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>  branch to deploy (e.g. main)
+#
+# Status: configuration only — not applied to the cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-devops-dev
+  namespace: argocd   # Argo CD only discovers Applications in its own namespace
+spec:
+  # Built-in "default" AppProject (unrestricted in this lab). A dedicated
+  # AppProject can be introduced later if source/destination scoping is wanted.
+  project: default
+  source:
+    repoURL: <HELLO_DEVOPS_GIT_REPOSITORY_URL>
+    targetRevision: <HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>
+    path: dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hello-devops-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

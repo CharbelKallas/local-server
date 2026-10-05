@@ -9,8 +9,7 @@ A local DevOps/cloud-native learning lab running on an Apple Silicon Mac (M2 Max
 | **K3s** | Linux VM | Lightweight Kubernetes cluster |
 | **Ollama** | Native macOS | Local LLM inference |
 | **Docker** | Native macOS | Container runtime (used only where appropriate) |
-| **LocalStack** | Docker | Local AWS service emulation |
-| **Argo CD** | K3s | GitOps continuous delivery |
+| **Argo CD** | K3s | GitOps continuous delivery (deploys external application repos) |
 | **Kargo** | K3s | GitOps promotion orchestration (dev → staging) |
 | **PostgreSQL** | K3s | Relational database (SQL) — manifests prepared, not deployed |
 | **MongoDB** | K3s | Document database (JSON) — manifests prepared, not deployed |
@@ -27,10 +26,34 @@ local-server/
 ├── Makefile
 ├── .gitignore
 ├── vm/               # Linux VM configuration (Lima)
-├── kubernetes/       # Kubernetes manifests (databases/)
+├── kubernetes/       # Kubernetes manifests
+│   ├── argocd/       #   Argo CD Application definitions (external apps)
+│   ├── databases/    #   PostgreSQL / MongoDB / Redis
+│   └── kargo/        #   Kargo Project / Warehouse / Stage (promotion)
 ├── scripts/          # Automation and utility scripts
 └── docs/             # Documentation
 ```
+
+## Two-Repository Design (Infrastructure vs. Application)
+
+Application code does **not** live in this repository. The future
+`hello-devops` application will live in its own separate Git repository;
+this repository keeps only the platform plus the GitOps configuration
+that points Argo CD and Kargo at it:
+
+| Concern | Owning repository |
+|---------|-------------------|
+| Application source code, Dockerfile, application Kubernetes manifests, application GitHub Actions | `hello-devops` (external — not created yet) |
+| Argo CD `Application` definitions, Kargo promotion configuration | `local-server` (this repo) |
+| VM, K3s, databases, monitoring, Argo CD / Kargo, scripts, docs | `local-server` (this repo) |
+
+Why separate: the two change at different cadences, their CI jobs need
+different credentials (only the app's CI pushes images — this repo never
+does), and a broken application merge must not be able to break the
+platform (and vice versa). Argo CD and Kargo are multi-repo by design,
+so the only coupling is a few documented placeholder URLs — no code is
+shared. Full rationale, ownership table, placeholders, and the future
+deployment flow: [docs/gitops.md](docs/gitops.md).
 
 ## Why a Linux VM Is Needed
 
@@ -121,6 +144,11 @@ Argo CD is installed in the K3s cluster (namespace `argocd`) from the
 official stable manifests. The UI is exposed on NodePort 30080, forwarded
 by Lima to `https://localhost:30080` on the Mac (no ingress controller).
 
+Argo CD `Application` definitions for the future **external** application
+repository are prepared (placeholders, **not applied**) under
+[`kubernetes/argocd/applications/`](kubernetes/argocd/applications/) —
+see [docs/gitops.md](docs/gitops.md).
+
 ```sh
 # Install / re-run (idempotent)
 make argocd-install
@@ -156,8 +184,11 @@ make kargo-status
 make kargo-password
 ```
 
-No `Project`/`Stage`/`Warehouse` objects exist yet — promotion workflows come
-in a later step. See [docs/kargo.md](docs/kargo.md) for full documentation.
+`Project`/`Stage`/`Warehouse` objects for the future external application
+are **prepared as configuration only** (placeholders, **not applied**)
+under [`kubernetes/kargo/`](kubernetes/kargo/) — see
+[docs/gitops.md](docs/gitops.md). See [docs/kargo.md](docs/kargo.md) for
+full documentation.
 
 ### Databases
 
@@ -189,11 +220,11 @@ how persistent storage works.
 - [x] K3s (lightweight Kubernetes — see `docs/k3s.md`)
 - [ ] Docker Desktop or Colima
 - [ ] Ollama
-- [ ] LocalStack
 - [x] Argo CD (GitOps CD — see `docs/argocd.md`)
 - [x] Kargo (GitOps promotion — see `docs/kargo.md`)
 - [ ] Databases: PostgreSQL / MongoDB / Redis (manifests ready, not deployed — see `docs/databases.md`)
 - [ ] Prometheus / Grafana / Loki
+- [ ] External application repository `hello-devops` (not created yet — GitOps config prepared, see `docs/gitops.md`)
 
 ## License
 

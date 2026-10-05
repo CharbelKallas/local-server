@@ -72,8 +72,10 @@ Also installed:
 
 Deliberately **not** installed: no Argo Rollouts (the API server detects its
 absence and disables that integration — see "expected log line" below), no
-database, no ingress controller, no monitoring, no `Project`/`Stage`/
-`Warehouse` objects yet.
+database, no ingress controller, no monitoring. `Project`/`Stage`/
+`Warehouse` objects for the future external application are **prepared as
+configuration** under `kubernetes/kargo/` but have **not been applied**
+(they still contain placeholders — see [gitops.md](gitops.md)).
 
 ## How to Access It (UI / API)
 
@@ -148,7 +150,9 @@ Argo CD and Kargo are complementary, not competing:
 | Acts by | Syncing the cluster from Git | Writing the new version to Git (promoting) |
 | Trigger | Git changes | Promotion events (manual/auto, with guardrails) |
 
-Planned shape for this lab (envs: `dev`, `staging` — **not created yet**):
+Planned shape for this lab (envs: `dev`, `staging` — prepared as
+configuration in `kubernetes/kargo/` for the future external
+application, **not applied**; see [gitops.md](gitops.md)):
 
 ```text
 Warehouse  ──finds new image──▶  Freight (immutable artifact bundle)

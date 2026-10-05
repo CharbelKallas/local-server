@@ -105,6 +105,19 @@ argocd-repo-server-...                               1/1     Running   0        
 argocd-server-...                                    1/1     Running   0          ...
 ```
 
+## Application Definitions (prepared, not applied)
+
+Argo CD `Application` manifests for the future **external** application
+repository live under
+[`kubernetes/argocd/applications/`](../kubernetes/argocd/applications/):
+`hello-devops-dev` and `hello-devops-staging`, each pointing at a
+different path (`dev` / `staging`) of the external `hello-devops`
+repository with automated sync into its own namespace
+(`hello-devops-dev` / `hello-devops-staging`). They contain documented
+**placeholders** (repository URL and branch) and have **not been
+applied**. See [gitops.md](gitops.md) for the two-repository design and
+the full future setup sequence.
+
 ## Install / Re-run
 
 ```sh

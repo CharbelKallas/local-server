@@ -1,0 +1,15 @@
+# Kargo Project for the future external application "hello-devops".
+#
+# A Project is Kargo's tenancy boundary: a namespace plus RBAC. Creating
+# this Project creates the namespace "hello-devops", which will hold the
+# Warehouse, Stages, and (later) the Git credentials for this pipeline.
+#
+# The application workloads themselves will run in separate per-stage
+# namespaces ("hello-devops-dev", "hello-devops-staging") created by
+# Argo CD — not in this namespace.
+#
+# Status: configuration only — not applied to the cluster.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: hello-devops
