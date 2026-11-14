@@ -1,13 +1,19 @@
 #!/bin/sh
-# Stop the Linux VM (named "k3s"). Graceful shutdown; add -f to force.
+# Stop the Linux VM (graceful shutdown).
 set -eu
+. "$(dirname -- "$0")/lib.sh"
 
-NAME="k3s"
+require_cmd limactl
 
-if ! limactl list | awk 'NR>1 {print $1}' | grep -qx "$NAME"; then
-  echo "VM '$NAME' does not exist. Nothing to stop."
+if ! vm_exists; then
+  echo "VM '$VM_NAME' does not exist. Nothing to stop."
   exit 0
 fi
 
-echo "Stopping VM '$NAME'..."
-limactl stop "$NAME"
+if [ "$(vm_status)" != "Running" ]; then
+  echo "VM '$VM_NAME' is not running. Nothing to stop."
+  exit 0
+fi
+
+echo "Stopping VM '$VM_NAME'..."
+limactl stop "$VM_NAME"

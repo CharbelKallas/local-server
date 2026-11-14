@@ -19,8 +19,9 @@ metadata:
   name: hello-devops-staging
   namespace: argocd   # Argo CD only discovers Applications in its own namespace
 spec:
-  # Built-in "default" AppProject (unrestricted in this lab).
-  project: default
+  # Dedicated AppProject (kubernetes/argocd/projects/hello-devops.yaml):
+  # restricts this app to its own repo and namespaces. Apply it first.
+  project: hello-devops
   source:
     repoURL: https://github.com/CharbelKallas/hello-devops.git
     targetRevision: master

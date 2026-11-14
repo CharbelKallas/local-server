@@ -1,0 +1,13 @@
+#!/bin/sh
+# Test stub for helm. Logs the call and, for --values files, their path
+# and contents (on CONTENT lines, kept apart from argv).
+echo "helm $*" >> "$STUB_LOG"
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--values" ] || [ "$prev" = "-f" ]; then
+    echo "HELM_VALUES_FILE $a" >> "$STUB_LOG"
+    sed 's/^ */CONTENT /' "$a" >> "$STUB_LOG"
+  fi
+  prev=$a
+done
+exit 0

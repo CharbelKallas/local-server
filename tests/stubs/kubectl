@@ -1,0 +1,56 @@
+#!/bin/sh
+# Test stub for kubectl. Logs every call to $STUB_LOG and answers from
+# STUB_* environment variables (see tests/scripts_test.sh).
+echo "kubectl $*" >> "$STUB_LOG"
+
+# Drop the global --context flag to simplify matching.
+args=""
+skip=false
+for a in "$@"; do
+  if $skip; then skip=false; continue; fi
+  if [ "$a" = "--context" ]; then skip=true; continue; fi
+  args="$args $a"
+done
+args=${args# }
+
+case "$args" in
+  "config get-contexts -o name")
+    printf '%s\n' "$STUB_CONTEXTS"
+    ;;
+  "get nodes")
+    exit "${STUB_NODES_RC:-0}"
+    ;;
+  *"get svc argocd-server"*nodePort*|*"get svc kargo-api"*nodePort*)
+    if [ -n "${STUB_NODEPORT:-}" ]; then printf '%s' "$STUB_NODEPORT"
+    else case "$args" in *kargo-api*) printf '30090' ;; esac
+    fi
+    ;;
+  *"get secret argocd-initial-admin-secret"*)
+    [ -n "${STUB_SECRET_B64:-}" ] || exit 1
+    printf '%s' "$STUB_SECRET_B64"
+    ;;
+  "get pvc -n databases -o name")
+    [ -n "${STUB_PVCS:-}" ] && printf '%s\n' "$STUB_PVCS"
+    ;;
+  "create secret generic "*)
+    # Record the *contents* of every --from-file source on CONTENT lines,
+    # so tests can check values without them being on any command line.
+    set -- $args
+    name=$4
+    for a in "$@"; do
+      case "$a" in
+        --from-file=*=*)
+          spec=${a#--from-file=}
+          key=${spec%%=*}
+          path=${spec#*=}
+          echo "CONTENT secret $name $key=$(cat "$path")" >> "$STUB_LOG"
+          ;;
+      esac
+    done
+    echo "kind: Secret"
+    ;;
+  *"apply"*" -f -"*|*"apply -f -")
+    cat > /dev/null
+    ;;
+esac
+exit 0

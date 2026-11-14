@@ -8,11 +8,11 @@ and [`kubernetes/kargo/`](../kubernetes/kargo/) prepare *this*
 infrastructure repository to deploy a future application that lives in a
 **separate** Git repository (`hello-devops`).
 
-Nothing here has been applied, installed, or started. Every reference to
-the future repository is a documented placeholder — no application
-repository URL is hardcoded. The `hello-devops` repository, its
-Dockerfile, its GitHub Actions, and the local container registry all do
-not exist yet either.
+Nothing here has been applied, installed, or started. The application
+repository URL and branch are resolved
+(`https://github.com/CharbelKallas/hello-devops.git`, `master`); the
+local container registry address is still a documented placeholder
+(`<LOCAL_REGISTRY_URL>`), and the registry itself does not exist yet.
 
 ## Why the Application and the Infrastructure Live in Separate Repositories
 
@@ -71,6 +71,8 @@ how does it get promoted."**
 ```text
 kubernetes/
 ├── argocd/
+│   ├── projects/
+│   │   └── hello-devops.yaml           # AppProject: limits what the app repo may deploy
 │   └── applications/
 │       ├── hello-devops-dev.yaml       # Argo CD Application → <app repo>/dev
 │       └── hello-devops-staging.yaml   # Argo CD Application → <app repo>/staging
@@ -128,11 +130,32 @@ Step by step:
 Kargo never touches the cluster; Argo CD never builds images; this
 repository never contains application code.
 
+## Blast Radius: the `hello-devops` AppProject
+
+Both Applications use a dedicated Argo CD `AppProject`
+([`kubernetes/argocd/projects/hello-devops.yaml`](../kubernetes/argocd/projects/hello-devops.yaml))
+instead of the built-in `default` project. With automated sync, whatever is
+committed to the application repository is applied to the cluster, so the
+project is the security boundary:
+
+| Restriction | Value |
+|---|---|
+| Allowed source repositories | `https://github.com/CharbelKallas/hello-devops.git` only |
+| Allowed destinations | namespaces `hello-devops-dev`, `hello-devops-staging` on this cluster |
+| Allowed cluster-scoped kinds | `Namespace` only (for `CreateNamespace=true`) |
+| Denied namespaced kinds | `ResourceQuota`, `LimitRange`, `NetworkPolicy` |
+
+Under `default`, anyone able to push to `hello-devops` (or its CI) could
+deploy `ClusterRoleBinding`s, CRDs, admission webhooks, or workloads into
+`kube-system` — full control of the cluster. The end-to-end test
+(`make test-e2e`) checks that an Application in this project targeting
+`kube-system` is rejected.
+
 ## Placeholders to Replace
 
 | Placeholder | Meaning | Files |
 |---|---|---|
-| `<HELLO_DEVOPS_GIT_REPOSITORY_URL>` | Clone URL of the future `hello-devops` repository | both files in `kubernetes/argocd/applications/`, `stage-dev.yaml`, `stage-staging.yaml` |
+| `<HELLO_DEVOPS_GIT_REPOSITORY_URL>` | Clone URL of the future `hello-devops` repository | both files in `kubernetes/argocd/applications/`, `kubernetes/argocd/projects/hello-devops.yaml`, `stage-dev.yaml`, `stage-staging.yaml` |
 | `<HELLO_DEVOPS_GIT_REPOSITORY_BRANCH>` | Branch holding the `dev/` and `staging/` paths (commonly `main`; `hello-devops` uses `master`) | same four files |
 | `<LOCAL_REGISTRY_URL>` | Base address of the local container registry, including port, no trailing slash (example form: `localhost:5000`) | `warehouse.yaml`, `stage-dev.yaml`, `stage-staging.yaml` |
 
@@ -147,6 +170,8 @@ in all four files
 Only `<LOCAL_REGISTRY_URL>` remains to be replaced — here in
 `warehouse.yaml`, `stage-dev.yaml`, `stage-staging.yaml`, and in the
 application repository (`base/deployment.yaml`, `dev/`, `staging/`).
+If the repository URL ever changes, change it in the AppProject's
+`sourceRepos` too, or Argo CD will refuse to sync.
 
 ## Expected Shape of the Future `hello-devops` Repository
 
@@ -217,8 +242,9 @@ configuration above.
    kubectl apply -f kubernetes/kargo/stage-dev.yaml
    kubectl apply -f kubernetes/kargo/stage-staging.yaml
    ```
-7. Apply the Argo CD Applications:
+7. Apply the Argo CD AppProject, then the Applications that use it:
    ```sh
+   kubectl apply -f kubernetes/argocd/projects/hello-devops.yaml
    kubectl apply -f kubernetes/argocd/applications/
    ```
 8. Verify and promote (see commands below).
@@ -227,7 +253,6 @@ configuration above.
 
 - Application source code, Dockerfile, application manifests, or
   application GitHub Actions — they belong to `hello-devops`.
-- Any hardcoded application repository URL — placeholders only.
 - The local container registry itself (nothing installed/started).
 - LocalStack, ECR, or any AWS dependency — the flow is fully local.
 - Filled-in credentials or committed `Secret`s.

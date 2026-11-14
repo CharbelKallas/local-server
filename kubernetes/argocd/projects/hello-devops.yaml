@@ -1,0 +1,44 @@
+# Argo CD AppProject for the EXTERNAL application repository "hello-devops".
+#
+# Why not the built-in "default" project: "default" allows any source
+# repository, any destination namespace, and any cluster-scoped resource.
+# Combined with automated sync, that would let anyone who can push to the
+# hello-devops repository (or anyone who compromises its CI) deploy
+# ClusterRoles/ClusterRoleBindings, CRDs, webhooks or workloads into
+# kube-system — i.e. take over the whole cluster.
+#
+# This project limits the blast radius to what the application needs:
+#   - source:       only the hello-devops repository
+#   - destinations: only the hello-devops-dev / hello-devops-staging
+#                   namespaces of this cluster
+#   - cluster-scoped resources: only Namespace (needed by the
+#                   CreateNamespace=true sync option)
+#   - namespaced resources that change the namespace's own guardrails
+#     (quotas, limit ranges, network policies) are denied.
+#
+# Must exist before the Applications that reference it.
+# Status: configuration only — not applied to the cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: hello-devops
+  namespace: argocd
+spec:
+  description: hello-devops application (external repository), dev and staging
+  sourceRepos:
+    - https://github.com/CharbelKallas/hello-devops.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: hello-devops-dev
+    - server: https://kubernetes.default.svc
+      namespace: hello-devops-staging
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+    - group: networking.k8s.io
+      kind: NetworkPolicy

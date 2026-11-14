@@ -1,22 +1,15 @@
 #!/bin/sh
-# Open an interactive shell on the Linux VM (named "k3s").
-# Usage: make vm-ssh   (or pass commands: scripts/vm-ssh.sh "uname -a")
+# Open an interactive shell on the Linux VM, or run one command in it.
+# Usage: make vm-ssh   (or: scripts/vm-ssh.sh uname -a)
 set -eu
+. "$(dirname -- "$0")/lib.sh"
 
-NAME="k3s"
-
-if ! limactl list | awk 'NR>1 {print $1}' | grep -qx "$NAME"; then
-  echo "VM '$NAME' does not exist. Run: make vm-start" >&2
-  exit 1
-fi
-
-if [ "$(limactl list | awk -v n="$NAME" '$1 == n {print $2}')" != "Running" ]; then
-  echo "VM '$NAME' is not running. Run: make vm-start" >&2
-  exit 1
-fi
+require_vm_running
 
 if [ $# -gt 0 ]; then
-  exec limactl shell "$NAME" -- bash -lc "$*"
+  # Arguments are joined into one login-shell command line, so
+  # scripts/vm-ssh.sh "uname -a" and scripts/vm-ssh.sh uname -a both work.
+  exec limactl shell "$VM_NAME" -- bash -lc "$*"
 else
-  exec limactl shell "$NAME"
+  exec limactl shell "$VM_NAME"
 fi

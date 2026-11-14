@@ -1,0 +1,20 @@
+#!/bin/sh
+# Test stub for limactl. STUB_VM_STATUS: "" (no VM), "Running", "Stopped".
+echo "limactl $*" >> "$STUB_LOG"
+case "$1" in
+  list)
+    if [ "${2:-}" = "--format" ]; then
+      [ -n "${STUB_VM_STATUS:-}" ] || exit 1
+      echo "$STUB_VM_STATUS"
+    fi
+    ;;
+  shell)
+    case "$*" in
+      *"command -v k3s"*) [ "${STUB_K3S_INSTALLED:-1}" = 1 ] || exit 1 ;;
+      *"systemctl is-active k3s"*) echo "${STUB_K3S_ACTIVE:-active}"
+                                   [ "${STUB_K3S_ACTIVE:-active}" = active ] || exit 3 ;;
+    esac
+    # Make positional args passed to `sh -c` visible in the log.
+    ;;
+esac
+exit 0

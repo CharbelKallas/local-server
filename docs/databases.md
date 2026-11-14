@@ -8,15 +8,21 @@
 | **MongoDB** | `mongo:8.0` | Document (JSON/BSON) data: flexible, evolving schemas and quick prototyping without migrations. |
 | **Redis** | `redis:7.4-alpine` | In-memory key-value store: caching, sessions, lightweight queues/locks. Runs with append-only-file (AOF) persistence in this lab so data survives restarts. |
 
-> **Status: configuration only.** The manifests are written and validated,
-> but nothing has been installed, applied, or started. There is no operator
-> and no replica/HA setup — this is a small local learning environment.
+> **Status:** `make databases-install` deploys all three with password
+> authentication. The lab cluster still runs the **earlier no-auth
+> version** (applied by hand on 2026-10-04) — see
+> [Upgrading from the No-Auth Setup](#upgrading-from-the-no-auth-setup);
+> the install script refuses to run over it until you choose how to
+> migrate. There is no operator and no replica/HA
+> setup — this is a small local learning environment. The manifests are
+> exercised end to end in a throwaway cluster by `make test-e2e`.
 
 ## Where the Kubernetes Configuration Is Located
 
 ```text
 kubernetes/
 └── databases/
+    ├── kustomization.yaml    # `kubectl apply -k` entry point (orders the namespace first)
     ├── namespace.yaml        # one shared namespace: "databases"
     ├── postgres/
     │   ├── deployment.yaml   # workload: 1 replica, image, resources, volume mount
@@ -37,40 +43,48 @@ namespaces per database would add ceremony without a benefit at this
 scale; the workloads still get their own Service DNS names, so nothing
 is ambiguous.
 
-Each database is exactly three simple objects:
+Each database is exactly three simple objects (plus a credentials
+`Secret` that is generated locally and never committed — see below):
 
 - **Deployment** (1 replica) — runs the container, sets resource
-  requests/limits, mounts the volume. The rollout strategy is
-  `Recreate`, so the old pod always releases the `ReadWriteOnce`
-  volume before its replacement starts.
+  requests/limits, readiness/liveness probes, mounts the volume. The
+  rollout strategy is `Recreate`, so the old pod always releases the
+  `ReadWriteOnce` volume before its replacement starts. Containers run
+  as the image's unprivileged user (no root, all capabilities dropped,
+  no privilege escalation, `RuntimeDefault` seccomp) and get no
+  Kubernetes API token.
 - **Service** (ClusterIP) — stable in-cluster DNS name and port.
 - **PersistentVolumeClaim** (1 GiB, `local-path`) — durable storage.
 
-## How They Will Eventually Be Deployed
-
-Nothing is deployed yet. When the cluster is running and deployment is
-wanted, apply the namespace first, then everything else:
+## How to Deploy
 
 ```sh
-# 1. create the namespace
-kubectl apply -f kubernetes/databases/namespace.yaml
-
-# 2. apply all database manifests (recursive)
-kubectl apply -R -f kubernetes/databases/
-
-# 3. verify
-kubectl get deploy,svc,pvc -n databases
-kubectl get pods -n databases
+make databases-install     # idempotent — safe to re-run
+make databases-status      # workloads, pods, services, volumes
+make databases-password    # print the credentials
 ```
 
-> The namespace must be applied first: `kubectl` walks a directory
-> alphabetically, so `mongodb/` would otherwise be processed before
-> `namespace.yaml` and fail with "namespaces not found".
+`make databases-install` (`scripts/databases-install.sh`):
+
+1. Generates three random 32-character passwords once into
+   `secrets/databases.env` (gitignored, mode `600`) and reuses them on
+   every re-run.
+2. Creates/updates the Secrets `postgres-credentials`,
+   `mongodb-credentials` and `redis-credentials` in the `databases`
+   namespace (values go through private temp files, never the command
+   line).
+3. Applies `kubernetes/databases/` with `kubectl apply -k` and waits for
+   the three rollouts.
+
+Applying the manifests without the script (`kubectl apply -k
+kubernetes/databases/`, or an Argo CD Application) works too, but the pods
+stay in `CreateContainerConfigError` until the three Secrets exist.
 
 Because this repo is already GitOps-based, the same manifests can later
 be deployed by pointing an **Argo CD Application** at
-`kubernetes/databases/` instead of running `kubectl apply` by hand —
-that is the intended long-term path (Argo CD deploys, Kargo promotes).
+`kubernetes/databases/` instead of running the script — the Secrets then
+need to come from a secret manager (e.g. Sealed Secrets or External
+Secrets), never from Git.
 
 ## Ports and Services
 
@@ -85,7 +99,7 @@ databases are **not** exposed with a NodePort or ingress — they are
 reachable only from inside the cluster. Other pods connect using the
 Service name, e.g. `postgres.databases.svc.cluster.local:5432`.
 
-To reach a database from the Mac (once deployed), use port-forwarding:
+To reach a database from the Mac, use port-forwarding:
 
 ```sh
 kubectl port-forward -n databases svc/postgres 5432:5432
@@ -93,17 +107,56 @@ kubectl port-forward -n databases svc/mongodb 27017:27017
 kubectl port-forward -n databases svc/redis 6379:6379
 ```
 
-### Credentials (local lab defaults)
+### Credentials
 
-| Database | Access |
-|----------|--------|
-| PostgreSQL | database `lab`, user `postgres`, `trust` authentication (no password) |
-| MongoDB | no authentication configured |
-| Redis | no password configured |
+| Database | User | Auth |
+|----------|------|------|
+| PostgreSQL | `postgres` (database `lab`) | password, `scram-sha-256` |
+| MongoDB | `root` (`authSource=admin`) | password (SCRAM), `--auth` enabled |
+| Redis | default user | `requirepass` |
 
-Acceptable for a local lab that is never exposed beyond the cluster.
-Before anything non-local, move credentials into `Secret`s (the
-gitignored `secrets/` directory pattern) and enable real authentication.
+`make databases-password` prints them. Example connections after
+`kubectl port-forward` (see above):
+
+```sh
+PGPASSWORD=... psql -h 127.0.0.1 -U postgres -d lab
+mongosh "mongodb://root:...@127.0.0.1:27017/?authSource=admin"
+REDISCLI_AUTH=... redis-cli -h 127.0.0.1
+```
+
+Applications in the cluster should read the password from the
+corresponding Secret (`secretKeyRef`) rather than copying it.
+
+### Rotating a Password
+
+PostgreSQL and MongoDB only read their initial credentials when the data
+directory is empty. To rotate, change the password **inside** the
+database first (`ALTER USER postgres PASSWORD '...'` /
+`db.changeUserPassword("root", "...")` / Redis needs no step — it reads
+the config on start), update the value in `secrets/databases.env`, then
+re-run `make databases-install` and restart the pod:
+
+```sh
+kubectl -n databases rollout restart deploy/postgres deploy/mongodb deploy/redis
+```
+
+### Upgrading from the No-Auth Setup
+
+Earlier versions of these manifests ran PostgreSQL with
+`POSTGRES_HOST_AUTH_METHOD=trust` and MongoDB/Redis without
+authentication. If you ever applied them, the existing volumes keep that
+state: PostgreSQL's `pg_hba.conf` still says `trust` and MongoDB has no
+users, so new passwords would be **silently ignored**.
+`make databases-install` detects this (volumes present, no saved
+credentials) and stops. Either:
+
+- **Throwaway data:** delete the old deployment and volumes, then install:
+  ```sh
+  kubectl delete -k kubernetes/databases/   # deletes the PVCs = deletes the data
+  make databases-install
+  ```
+- **Keep data:** dump it first (`pg_dumpall`, `mongodump`, Redis
+  `BGSAVE`), recreate as above, and restore.
 
 ## How Persistent Storage Works
 
@@ -147,13 +200,15 @@ What this means in practice:
 - Replicas, clustering, high availability
 - Distributed storage (Ceph/Longhorn/etc.)
 - Backup/snapshot infrastructure
-- TLS, Secrets, and auth hardening
-- Probes and monitoring
+- TLS between clients and databases
+- NetworkPolicies (any pod in the cluster can reach the Services; the
+  passwords are the access control)
+- Monitoring/exporters
 
 All of that can be layered on later; this milestone is the simplest
 possible correct starting point.
 
-## Verify After Deploying (for later use)
+## Verify After Deploying
 
 ```sh
 # Workloads, services, claims

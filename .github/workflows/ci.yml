@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint and script unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install htpasswd
+        run: sudo apt-get update -q && sudo apt-get install -y -q apache2-utils
+      - name: make test
+        run: make test
+
+  e2e:
+    name: End-to-end (kind)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    needs: test
+    env:
+      KIND_VERSION: v0.33.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install htpasswd and kind
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q apache2-utils
+          curl -fsSLo kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 kind /usr/local/bin/kind && rm kind
+          kind version; kubectl version --client; helm version
+      - name: make test-e2e
+        run: make test-e2e

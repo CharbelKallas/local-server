@@ -3,13 +3,19 @@
 ## Where Argo CD Runs
 
 Argo CD is installed into the existing K3s cluster, in its own namespace
-`argocd`, using the official stable manifests (the normal Kubernetes
-installation method, non-HA):
+`argocd`, using the official manifests (the normal Kubernetes installation
+method, non-HA), **pinned to a release** (`ARGOCD_VERSION` in
+`scripts/argocd-install.sh`, currently `v3.6.1`):
 
 ```sh
-kubectl apply --server-side -n argocd \
-  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl --context k3s-lab apply --server-side -n argocd \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.1/manifests/install.yaml
 ```
+
+> The `stable` branch is deliberately not used: it moves with every
+> release, so re-running the install could silently upgrade Argo CD
+> (including across a major version). To upgrade, change `ARGOCD_VERSION`,
+> read the upstream upgrade notes, and re-run `make argocd-install`.
 
 > Server-side apply is required because the `applicationsets` CRD is
 > larger than the 256 KiB annotation limit of client-side `kubectl apply`.
@@ -62,18 +68,28 @@ kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath='{.data.password}' | base64 -d; echo
 ```
 
-Note: this secret is deleted after the first successful login. To reset a
-lost password later:
+Argo CD does **not** delete this secret by itself. Recommended after the
+first login: change the password (UI → *User Info* → *Update Password*, or
+`argocd account update-password`), then delete the initial secret so the
+original password is no longer lying around in the cluster:
 
 ```sh
-kubectl -n argocd patch secret argocd-initial-admin-secret \
-  -p '{"data":{"password":"'$(kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath='{.data.password}')'"}}'
-kubectl -n argocd rollout restart deploy/argocd-server
+kubectl --context k3s-lab -n argocd delete secret argocd-initial-admin-secret
 ```
 
-(or simply set a new password with `argocd account update-password` after
-logging in with any valid credential).
+## Reset the Admin Password
+
+The real admin password hash lives in the `argocd-secret` Secret (key
+`admin.password`). Removing it makes Argo CD generate a new random
+password and recreate `argocd-initial-admin-secret` on restart:
+
+```sh
+kubectl --context k3s-lab -n argocd patch secret argocd-secret \
+  -p '{"data": {"admin.password": null, "admin.passwordMtime": null}}'
+kubectl --context k3s-lab -n argocd rollout restart deploy/argocd-server
+kubectl --context k3s-lab -n argocd rollout status deploy/argocd-server
+make argocd-password
+```
 
 ## Verify Health
 
@@ -114,7 +130,8 @@ repository live under
 different path (`dev` / `staging`) of the external `hello-devops`
 repository with automated sync into its own namespace
 (`hello-devops-dev` / `hello-devops-staging`). They contain documented
-**placeholders** (repository URL and branch) and have **not been
+resolved repository URL/branch, use the dedicated, restricted AppProject
+`hello-devops` (`kubernetes/argocd/projects/`), and have **not been
 applied**. See [gitops.md](gitops.md) for the two-repository design and
 the full future setup sequence.
 
@@ -122,6 +139,9 @@ the full future setup sequence.
 
 ```sh
 # Install (idempotent — safe to re-run, also re-applies the NodePort patch)
+make argocd-install
+
+# Upgrade: bump ARGOCD_VERSION in scripts/argocd-install.sh, then
 make argocd-install
 ```
 

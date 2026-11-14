@@ -5,22 +5,16 @@
 # password is set at install time via a bcrypt hash, so the plaintext is kept
 # only in the local, gitignored credentials file created by kargo-install.sh.
 set -eu
+. "$(dirname -- "$0")/lib.sh"
 
-REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-CRED_FILE="$REPO_ROOT/secrets/kargo-admin.env"
+CRED_FILE="$SECRETS_DIR/kargo-admin.env"
 
-if [ ! -f "$CRED_FILE" ]; then
-  echo "No Kargo credentials found. Run: make kargo-install" >&2
-  exit 1
-fi
+[ -f "$CRED_FILE" ] || die "No Kargo credentials found. Run: make kargo-install"
 
 # shellcheck disable=SC1090
 . "$CRED_FILE"
 
-if [ -z "${KARGO_ADMIN_PASSWORD:-}" ]; then
-  echo "KARGO_ADMIN_PASSWORD missing from $CRED_FILE" >&2
-  exit 1
-fi
+[ -n "${KARGO_ADMIN_PASSWORD:-}" ] || die "KARGO_ADMIN_PASSWORD missing from $CRED_FILE"
 
 echo "Kargo admin username: admin"
 echo "Kargo admin password: $KARGO_ADMIN_PASSWORD"

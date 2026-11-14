@@ -1,8 +1,12 @@
 # MongoDB — single replica, deliberately simple.
 # - strategy "Recreate" keeps one pod attached to the ReadWriteOnce
 #   volume at a time.
-# - No authentication configured: local learning lab only, reachable
-#   from inside the cluster only.
+# - Authentication is enabled: the image's entrypoint creates the root
+#   user from MONGO_INITDB_ROOT_USERNAME/PASSWORD on first start (empty
+#   data directory) and then runs mongod with --auth. Credentials come
+#   from the Secret "mongodb-credentials", created by
+#   scripts/databases-install.sh — never stored in Git.
+# - Runs as the image's unprivileged "mongodb" user (uid/gid 999).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,12 +26,52 @@ spec:
       labels:
         app: mongodb
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mongodb
           image: mongo:8.0
           ports:
             - name: mongodb
               containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-credentials
+                  key: username
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-credentials
+                  key: password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # TCP probes, not `mongosh`: mongosh is a Node.js process that can
+          # take several seconds to start under the 500m CPU limit, which
+          # makes exec probes time out and flap. A TCP check is accurate
+          # here: during first-start initialisation the image's entrypoint
+          # binds mongod to localhost only, so the pod IP accepts
+          # connections only once the real, authenticated server is up.
+          readinessProbe:
+            tcpSocket:
+              port: mongodb
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: mongodb
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
           resources:
             requests:
               cpu: 100m
