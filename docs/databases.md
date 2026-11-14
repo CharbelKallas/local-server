@@ -8,12 +8,10 @@
 | **MongoDB** | `mongo:8.0` | Document (JSON/BSON) data: flexible, evolving schemas and quick prototyping without migrations. |
 | **Redis** | `redis:7.4-alpine` | In-memory key-value store: caching, sessions, lightweight queues/locks. Runs with append-only-file (AOF) persistence in this lab so data survives restarts. |
 
-> **Status:** `make databases-install` deploys all three with password
-> authentication. The lab cluster still runs the **earlier no-auth
-> version** (applied by hand on 2026-10-04) — see
-> [Upgrading from the No-Auth Setup](#upgrading-from-the-no-auth-setup);
-> the install script refuses to run over it until you choose how to
-> migrate. There is no operator and no replica/HA
+> **Status: deployed** in the lab cluster with password authentication
+> (`make databases-install`, 2026-11-15). The earlier no-auth version
+> (applied 2026-10-04) was removed together with its throwaway data — see
+> [Upgrading from the No-Auth Setup](#upgrading-from-the-no-auth-setup). There is no operator and no replica/HA
 > setup — this is a small local learning environment. The manifests are
 > exercised end to end in a throwaway cluster by `make test-e2e`.
 

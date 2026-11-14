@@ -252,7 +252,7 @@ on every push and pull request.
 - [ ] Ollama
 - [x] Argo CD (GitOps CD — see `docs/argocd.md`)
 - [x] Kargo (GitOps promotion — see `docs/kargo.md`)
-- [ ] Databases: PostgreSQL / MongoDB / Redis (no-auth version running since 2026-10-04; migrate to `make databases-install` — see `docs/databases.md`)
+- [x] Databases: PostgreSQL / MongoDB / Redis (password auth, `make databases-install` — see `docs/databases.md`)
 - [ ] Prometheus / Grafana / Loki
 - [ ] External application repository `hello-devops` (not created yet — GitOps config prepared, see `docs/gitops.md`)
 
