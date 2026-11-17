@@ -32,11 +32,12 @@ RELEASE="kargo"
 CHART_VERSION="1.12.1"          # keep in sync with docs/kargo.md
 CERT_MANAGER_VERSION="v1.21.3"  # keep in sync with docs/kargo.md
 API_NODE_PORT="30090"
-# Optional local copies of the same pinned artifacts (offline installs, or
-# the e2e test reusing its one download): KARGO_CHART = a packaged chart
-# (.tgz from `helm pull`), CERT_MANAGER_MANIFEST = cert-manager.yaml.
+# Optional other copies of the same pinned artifacts (offline installs, a
+# mirror, or the e2e test reusing its one download), both version-checked:
+# KARGO_CHART = a packaged chart (.tgz from `helm pull`) or another OCI ref,
+# CERT_MANAGER_MANIFEST = a cert-manager.yaml file or URL.
 CHART="${KARGO_CHART:-oci://ghcr.io/akuity/kargo-charts/kargo}"
-CERT_MANAGER_MANIFEST="${CERT_MANAGER_MANIFEST:-https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml}"
+DEFAULT_CERT_MANAGER_MANIFEST="https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml"
 CRED_FILE="$SECRETS_DIR/kargo-admin.env"
 
 require_cluster
@@ -57,15 +58,28 @@ esac
 require_cmd openssl
 require_cmd htpasswd
 
+# Temp files (credentials, values, a downloaded manifest override) hold
+# real secrets or unverified downloads: always remove them, even on Ctrl-C. (EXIT
+# does the cleanup; INT/TERM must exit explicitly, or a bare handler would
+# run the cleanup and then let the script carry on.)
+tmp_cred=""
+values_file=""
+cleanup() { rm -f "$tmp_cred" "$values_file" "$PINNED_TMP"; }
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
 # --- cert-manager (dependency of Kargo's default configuration) ------------
 if kc get deploy -n cert-manager cert-manager >/dev/null 2>&1; then
   echo "cert-manager already installed — leaving it untouched."
 else
   echo "Installing cert-manager $CERT_MANAGER_VERSION (required by Kargo)..."
+  use_pinned_manifest "${CERT_MANAGER_MANIFEST:-$DEFAULT_CERT_MANAGER_MANIFEST}" \
+    "$DEFAULT_CERT_MANAGER_MANIFEST" \
+    "quay.io/jetstack/cert-manager-controller:$CERT_MANAGER_VERSION" CERT_MANAGER_MANIFEST
   # Server-side apply: cert-manager's CRDs exceed the 256 KiB
   # last-applied-configuration annotation limit of client-side apply.
   kc apply --server-side --force-conflicts \
-    -f "$CERT_MANAGER_MANIFEST"
+    -f "$PINNED_MANIFEST"
 fi
 
 echo "Waiting for cert-manager to become ready..."
@@ -73,14 +87,6 @@ kc wait --for=condition=Available deploy --all -n cert-manager --timeout=300s
 
 # --- admin account credentials (generated once, reused on re-runs) --------
 umask 077
-# Temp files hold real secrets: always remove them, even on Ctrl-C. (EXIT
-# does the cleanup; INT/TERM must exit explicitly, or a bare handler would
-# run the cleanup and then let the script carry on.)
-tmp_cred=""
-values_file=""
-cleanup() { rm -f "$tmp_cred" "$values_file"; }
-trap cleanup EXIT
-trap 'exit 130' INT TERM
 # Also tightens a secrets/ directory created by older versions (0755).
 ensure_secrets_dir
 if [ -f "$CRED_FILE" ]; then

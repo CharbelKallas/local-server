@@ -38,10 +38,12 @@ setup() {
   export STUB_VM_STATUS="Running"
   export STUB_NODEPORT=""
   export STUB_PVCS=""
-  # `VAR=x run ...` can leave VAR set afterwards in POSIX sh (assignments
-  # before a function call), so every override a test may set is reset here.
-  unset STUB_PVC_RC STUB_APPLY_ACTION STUB_JOB_STATE STUB_CHART_VERSION STUB_CERT_MANAGER_MISSING \
-    DB_APP_NAMESPACES ARGOCD_MANIFEST KARGO_CHART CERT_MANAGER_MANIFEST KUBE_CONTEXT VM_NAME K3S_VERSION ARGOCD_VERSION
+  # Stub behaviours a test exports apply to that test only; overrides
+  # from the developer's own shell must not leak in either. (Per-run
+  # overrides go through `run NAME=value ...`, which never touches this shell.)
+  unset STUB_PVC_RC STUB_APPLY_ACTION STUB_JOB_STATE STUB_SECRET_B64 STUB_K3S_INSTALLED \
+    STUB_K3S_ACTIVE STUB_CURL_FILE KUBE_CONTEXT DB_APP_NAMESPACES ARGOCD_MANIFEST \
+    KARGO_CHART CERT_MANAGER_MANIFEST
 }
 
 fail() {
@@ -52,10 +54,28 @@ fail() {
 ok() { PASS=$((PASS + 1)); }
 
 # run <script> [args...] — captures stdout+stderr in $OUT and exit code in $RC
-run() {
+# run [NAME=value ...] <script> [args...] — captures stdout+stderr in $OUT
+# and the exit code in $RC. Leading NAME=value arguments are exported only
+# inside the command substitution's subshell, so — unlike `NAME=value run`,
+# which POSIX sh may leave set in the test shell — they cannot leak into
+# later tests.
+run_in_subshell() {
+  while [ $# -gt 0 ]; do
+    # shellcheck disable=SC2163  # exports the NAME=value given in $1
+    case "$1" in
+      [A-Za-z_]*=*) export "$1"; shift ;;
+      *) break ;;
+    esac
+  done
   script=$1
   shift
-  OUT=$("$SCRIPTS/$script" "$@" 2>&1)
+  "$SCRIPTS/$script" "$@"
+}
+run() {
+  # The helper runs inside $(...), i.e. in a subshell: its exports end there.
+  # (Kept out of the substitution itself: bash 3.2, macOS's /bin/sh, cannot
+  # parse a case statement inside $(...).)
+  OUT=$(run_in_subshell "$@" 2>&1)
   RC=$?
 }
 
@@ -162,23 +182,49 @@ assert_all_calls_pinned_to k3s-lab
 setup "argocd-install: ARGOCD_MANIFEST overrides the download"
 STUB_NODEPORT=30080
 printf '        image: quay.io/argoproj/argocd:v3.6.1\n' > "$WORK/case/install.yaml"
-ARGOCD_MANIFEST="$WORK/case/install.yaml" run argocd-install.sh
+run ARGOCD_MANIFEST="$WORK/case/install.yaml" argocd-install.sh
 assert_rc 0
 assert_log_contains "-f $WORK/case/install.yaml"
 assert_log_not_contains "raw.githubusercontent.com"
 
 setup "argocd-install: refuses an ARGOCD_MANIFEST of another version"
 printf '        image: quay.io/argoproj/argocd:v2.14.0\n' > "$WORK/case/install.yaml"
-ARGOCD_MANIFEST="$WORK/case/install.yaml" run argocd-install.sh
+run ARGOCD_MANIFEST="$WORK/case/install.yaml" argocd-install.sh
 assert_rc 1
-assert_out_contains "is not the Argo CD v3.6.1 install manifest"
+assert_out_contains "does not contain image quay.io/argoproj/argocd:v3.6.1"
 assert_log_not_contains "apply --server-side"
+
+setup "argocd-install: a URL override is downloaded and version-checked"
+STUB_NODEPORT=30080
+printf '        image: quay.io/argoproj/argocd:v2.14.0\n' > "$WORK/case/mirror.yaml"
+run STUB_CURL_FILE="$WORK/case/mirror.yaml" ARGOCD_MANIFEST=https://mirror.example/install.yaml argocd-install.sh
+assert_rc 1
+assert_out_contains "does not contain image quay.io/argoproj/argocd:v3.6.1"
+assert_log_not_contains "apply --server-side"
+printf '        image: quay.io/argoproj/argocd:v3.6.1\n' > "$WORK/case/mirror.yaml"
+: > "$STUB_LOG"
+run STUB_CURL_FILE="$WORK/case/mirror.yaml" ARGOCD_MANIFEST=https://mirror.example/install.yaml argocd-install.sh
+assert_rc 0
+assert_log_contains "curl -fsSL -o"
+assert_log_not_contains "-f https://mirror.example/install.yaml"
+
+setup "kargo-install: refuses a CERT_MANAGER_MANIFEST of another version"
+printf '        image: quay.io/jetstack/cert-manager-controller:v1.15.0\n' > "$WORK/case/cm.yaml"
+run STUB_CERT_MANAGER_MISSING=1 CERT_MANAGER_MANIFEST="$WORK/case/cm.yaml" kargo-install.sh
+assert_rc 1
+assert_out_contains "does not contain image quay.io/jetstack/cert-manager-controller:v1.21.3"
+assert_log_not_contains "upgrade --install"
+
+setup "run NAME=value ... does not leak into the test shell"
+run KARGO_CHART=/leak/test.tgz ARGOCD_MANIFEST=/leak/x.yaml kargo-password.sh
+if [ -z "${KARGO_CHART:-}" ] && [ -z "${ARGOCD_MANIFEST:-}" ]; then ok
+else fail "override leaked: KARGO_CHART='${KARGO_CHART:-}' ARGOCD_MANIFEST='${ARGOCD_MANIFEST:-}'"; fi
 
 setup "argocd-install: KUBE_CONTEXT override is honoured everywhere"
 STUB_CONTEXTS="k3s-lab
 lab-two"
 STUB_NODEPORT=30080
-KUBE_CONTEXT=lab-two run argocd-install.sh
+run KUBE_CONTEXT=lab-two argocd-install.sh
 assert_rc 0
 assert_all_calls_pinned_to lab-two
 
@@ -194,7 +240,6 @@ export STUB_SECRET_B64
 run argocd-password.sh
 assert_rc 0
 assert_out_contains "Initial admin password: s3cr3t"
-unset STUB_SECRET_B64
 
 setup "argocd-password: explains a missing secret"
 run argocd-password.sh
@@ -236,15 +281,16 @@ assert_rc 0
 if [ "$(file_mode "$SECRETS_DIR")" = "700" ]; then ok; else fail "secrets dir left at $(file_mode "$SECRETS_DIR")"; fi
 
 setup "kargo-install: local chart and cert-manager manifest overrides"
-STUB_CERT_MANAGER_MISSING=1 KARGO_CHART=/tmp/kargo-1.12.1.tgz CERT_MANAGER_MANIFEST=/tmp/cm.yaml run kargo-install.sh
+printf '        image: "quay.io/jetstack/cert-manager-controller:v1.21.3"\r\n' > "$WORK/case/cm.yaml"
+run STUB_CERT_MANAGER_MISSING=1 KARGO_CHART=/tmp/kargo-1.12.1.tgz CERT_MANAGER_MANIFEST="$WORK/case/cm.yaml" kargo-install.sh
 assert_rc 0
 assert_log_contains "upgrade --install kargo /tmp/kargo-1.12.1.tgz --namespace kargo"
 assert_log_contains "helm show chart /tmp/kargo-1.12.1.tgz"
-assert_log_contains "apply --server-side --force-conflicts -f /tmp/cm.yaml"
+assert_log_contains "apply --server-side --force-conflicts -f $WORK/case/cm.yaml"
 assert_log_not_contains "--version 1.12.1"
 
 setup "kargo-install: refuses a KARGO_CHART of another version"
-STUB_CHART_VERSION=1.9.0 KARGO_CHART=/tmp/kargo-1.9.0.tgz run kargo-install.sh
+run STUB_CHART_VERSION=1.9.0 KARGO_CHART=/tmp/kargo-1.9.0.tgz kargo-install.sh
 assert_rc 1
 assert_out_contains "is Kargo chart '1.9.0', expected 1.12.1"
 assert_log_not_contains "upgrade --install"
@@ -352,7 +398,6 @@ export STUB_APPLY_ACTION=unchanged
 : > "$STUB_LOG"
 run databases-install.sh
 assert_log_not_contains "rollout restart deploy/redis"
-unset STUB_APPLY_ACTION
 
 setup "databases-install: re-runs the provisioning Job each time"
 run databases-install.sh
@@ -369,10 +414,9 @@ assert_rc 1
 assert_out_contains "Could not create/update the hello-devops database users."
 assert_out_contains "MongoServerError: Authentication failed."
 assert_log_not_contains "hello-devops-db-credentials"
-unset STUB_JOB_STATE
 
 setup "databases-install: app namespaces are overridable"
-DB_APP_NAMESPACES="ns-a" run databases-install.sh
+run DB_APP_NAMESPACES="ns-a" databases-install.sh
 assert_rc 0
 assert_log_contains "create secret generic hello-devops-db-credentials -n ns-a"
 assert_log_not_contains "-n hello-devops-dev"
@@ -383,7 +427,6 @@ run databases-install.sh
 assert_rc 1
 assert_out_contains "Could not list PVCs"
 assert_log_not_contains "apply -k"
-unset STUB_PVC_RC
 
 setup "databases-install: existing volumes are fine when credentials exist"
 run databases-install.sh
@@ -403,12 +446,10 @@ assert_out_not_contains "Last run FAILED"
 export STUB_JOB_STATE=Failed
 run databases-status.sh
 assert_out_contains "Last run FAILED"
-unset STUB_JOB_STATE
 export STUB_JOB_STATE=absent
 run databases-status.sh
 assert_rc 0
 assert_out_contains "(no recent run"
-unset STUB_JOB_STATE
 
 setup "databases-password: prints all three credentials"
 run databases-install.sh
@@ -483,14 +524,12 @@ run k3s-start.sh
 assert_rc 0
 assert_log_contains "v1.36.5+k3s1"
 assert_log_contains "systemctl start k3s"
-unset STUB_K3S_INSTALLED
 
 setup "k3s-status: reports an inactive service instead of crashing"
 export STUB_K3S_ACTIVE=inactive
 run k3s-status.sh
 assert_rc 1
 assert_out_contains "K3s is not running"
-unset STUB_K3S_ACTIVE
 
 # --- summary ------------------------------------------------------------------
 

@@ -1,4 +1,6 @@
 # shellcheck shell=sh
+# Globals set here (PINNED_MANIFEST, ...) are read by the sourcing script.
+# shellcheck disable=SC2034
 # Shared helpers for the scripts in this directory. Source it, don't run it:
 #
 #   . "$(dirname -- "$0")/lib.sh"
@@ -58,6 +60,40 @@ require_vm_running() {
 gen_secret() {
   # base64 of 48 random bytes is 64 chars; stripping =+/ never drops it below 32.
   openssl rand -base64 48 | tr -d '=+/\n' | head -c "${1:-32}"
+}
+
+# use_pinned_manifest <source> <default URL> <pinned image> <variable name>
+# Sets PINNED_MANIFEST to what should be applied. The default (pinned) URL
+# is used as is. Any override — a local file OR another URL, e.g. a mirror —
+# must contain the pinned image (`image: <ref>`), otherwise this dies: an
+# unverified manifest could silently up- or downgrade the component while
+# the script reports the pinned version. A URL override is downloaded to
+# $PINNED_TMP first (callers remove it on exit) and checked like a file.
+PINNED_MANIFEST=""
+PINNED_TMP=""
+use_pinned_manifest() {
+  src=$1 default=$2 image=$3 var=$4
+  if [ "$src" = "$default" ]; then
+    PINNED_MANIFEST=$src
+    return 0
+  fi
+  case "$src" in
+    http://* | https://*)
+      PINNED_TMP=$(mktemp)
+      curl -fsSL -o "$PINNED_TMP" "$src" || die "$var: could not download '$src'."
+      file=$PINNED_TMP
+      ;;
+    *)
+      [ -r "$src" ] || die "$var '$src' is not a readable file."
+      file=$src
+      ;;
+  esac
+  # Literal match on the image reference (dots escaped); tolerates quotes
+  # and CRLF line endings.
+  image_re=$(printf '%s' "$image" | sed 's/[.]/\\./g')
+  grep -Eq "image: *\"?$image_re\"?[[:space:]]*\$" "$file" \
+    || die "$var '$src' does not contain image $image (not the pinned release)."
+  PINNED_MANIFEST=$file
 }
 
 # Create the gitignored secrets/ directory with owner-only permissions.

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Test stub for curl (used for URL manifest overrides): logs the call and
+# "downloads" $STUB_CURL_FILE to the -o target. No network access.
+echo "curl $*" >> "$STUB_LOG"
+out=""
+prev=""
+for a in "$@"; do
+  [ "$prev" = "-o" ] && out=$a
+  prev=$a
+done
+[ -n "${STUB_CURL_FILE:-}" ] && [ -n "$out" ] || exit 22
+cp "$STUB_CURL_FILE" "$out"

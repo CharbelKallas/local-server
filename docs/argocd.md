@@ -168,7 +168,8 @@ make argocd-install
 # Upgrade: bump ARGOCD_VERSION in scripts/argocd-install.sh, then
 make argocd-install
 
-# Offline: install from a local copy of the same pinned manifest
+# Offline / mirror: install from another copy of the same pinned manifest
+# (a file or URL). It must be the pinned release — otherwise it is refused.
 ARGOCD_MANIFEST=/path/to/install.yaml make argocd-install
 ```
 

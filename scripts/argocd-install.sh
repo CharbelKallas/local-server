@@ -13,23 +13,18 @@ set -eu
 NAMESPACE="argocd"
 NODE_PORT="30080"
 ARGOCD_VERSION="${ARGOCD_VERSION:-v3.6.1}"   # keep in sync with docs/argocd.md
-# ARGOCD_MANIFEST may point at a local copy of the same file (offline
-# installs, or the e2e test reusing its one download).
-MANIFEST="${ARGOCD_MANIFEST:-https://raw.githubusercontent.com/argoproj/argo-cd/$ARGOCD_VERSION/manifests/install.yaml}"
+DEFAULT_MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/$ARGOCD_VERSION/manifests/install.yaml"
 
 require_cluster
 
-# A local override must be the pinned release, or it would silently up- or
-# downgrade Argo CD (possibly across a major version) while this script
-# reports $ARGOCD_VERSION.
-case "$MANIFEST" in
-  http://* | https://*) ;;
-  *)
-    [ -r "$MANIFEST" ] || die "ARGOCD_MANIFEST '$MANIFEST' is not a readable file."
-    grep -q "image: quay.io/argoproj/argocd:$ARGOCD_VERSION\$" "$MANIFEST" \
-      || die "ARGOCD_MANIFEST '$MANIFEST' is not the Argo CD $ARGOCD_VERSION install manifest."
-    ;;
-esac
+# ARGOCD_MANIFEST may point at another copy of the same manifest (a local
+# file for offline installs, a mirror URL, or the e2e test's one download).
+# It must be the pinned release — checked by use_pinned_manifest.
+trap 'rm -f "$PINNED_TMP"' EXIT
+trap 'exit 130' INT TERM
+use_pinned_manifest "${ARGOCD_MANIFEST:-$DEFAULT_MANIFEST}" "$DEFAULT_MANIFEST" \
+  "quay.io/argoproj/argocd:$ARGOCD_VERSION" ARGOCD_MANIFEST
+MANIFEST=$PINNED_MANIFEST
 
 echo "Creating namespace '$NAMESPACE' (if missing)..."
 kc create namespace "$NAMESPACE" --dry-run=client -o yaml | kc apply -f -
