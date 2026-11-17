@@ -72,7 +72,8 @@ how does it get promoted."**
 kubernetes/
 ├── argocd/
 │   ├── projects/
-│   │   └── hello-devops.yaml           # AppProject: limits what the app repo may deploy
+│   │   ├── hello-devops.yaml           # AppProject: limits what the app repo may deploy
+│   │   └── hello-devops-namespaces.yaml # the two destination namespaces (owned here)
 │   └── applications/
 │       ├── hello-devops-dev.yaml       # Argo CD Application → <app repo>/dev
 │       └── hello-devops-staging.yaml   # Argo CD Application → <app repo>/staging
@@ -142,14 +143,39 @@ project is the security boundary:
 |---|---|
 | Allowed source repositories | `https://github.com/CharbelKallas/hello-devops.git` only |
 | Allowed destinations | namespaces `hello-devops-dev`, `hello-devops-staging` on this cluster |
-| Allowed cluster-scoped kinds | `Namespace` only (for `CreateNamespace=true`) |
-| Denied namespaced kinds | `ResourceQuota`, `LimitRange`, `NetworkPolicy` |
+| Allowed cluster-scoped kinds | **none** — not even `Namespace` |
+| Denied namespaced kinds | `ResourceQuota`, `LimitRange`, `NetworkPolicy`, and `Endpoints`/`EndpointSlice` (hand-wired endpoints could point a Service at pods in other namespaces, e.g. the databases, and publish them on a NodePort that Lima forwards to the Mac) |
+| Pod Security (on the two namespaces) | `restricted` enforced (policy pinned to v1.36): no privileged, root, `hostPath`, host network/PID |
 
 Under `default`, anyone able to push to `hello-devops` (or its CI) could
 deploy `ClusterRoleBinding`s, CRDs, admission webhooks, or workloads into
-`kube-system` — full control of the cluster. The end-to-end test
-(`make test-e2e`) checks that an Application in this project targeting
-`kube-system` is rejected.
+`kube-system` — full control of the cluster.
+
+`Namespace` is deliberately not allowed either, even though that means the
+Applications cannot use Argo CD's `CreateNamespace=true` (which Argo CD
+treats as deploying a `Namespace` and therefore requires the kind to be
+whitelisted). Whitelisting it would let the application repository commit a
+manifest for *any* existing namespace — say `kube-system` — relabel it
+(e.g. relax its pod-security labels), and, because `prune` is on, delete it
+once the manifest is removed again. Instead, **this repository owns the two
+destination namespaces**
+([`hello-devops-namespaces.yaml`](../kubernetes/argocd/projects/hello-devops-namespaces.yaml)),
+applied together with the project.
+
+The project limits *which kinds* the repository may deploy; Pod Security
+limits *what its Pods may do*. Without it, a single privileged Pod with a
+`hostPath` mount of `/` would give root on the K3s node — including the
+cluster-admin kubeconfig — despite every AppProject restriction. Both
+namespaces are therefore labelled
+`pod-security.kubernetes.io/enforce: restricted`; hello-devops's
+Deployment already meets that profile.
+
+The end-to-end test (`make test-e2e`) checks all of this against a real
+Argo CD: an Application in this project targeting `kube-system` is
+rejected; asking it to create a `Namespace` is refused and no namespace
+appears; the real `hello-devops-dev` Application syncs from the
+application repository into the infra-owned namespace and its pods are
+admitted; and a privileged `hostPath` pod in that namespace is rejected.
 
 ## Placeholders to Replace
 
@@ -242,9 +268,10 @@ configuration above.
    kubectl apply -f kubernetes/kargo/stage-dev.yaml
    kubectl apply -f kubernetes/kargo/stage-staging.yaml
    ```
-7. Apply the Argo CD AppProject, then the Applications that use it:
+7. Apply the Argo CD AppProject and the two destination namespaces, then
+   the Applications that use them:
    ```sh
-   kubectl apply -f kubernetes/argocd/projects/hello-devops.yaml
+   kubectl apply -f kubernetes/argocd/projects/      # AppProject + namespaces
    kubectl apply -f kubernetes/argocd/applications/
    ```
 8. Verify and promote (see commands below).

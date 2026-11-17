@@ -196,6 +196,11 @@ make kargo-status
 make kargo-password
 ```
 
+Offline / pre-downloaded installs: point the script at local copies of the
+same pinned artifacts —
+`KARGO_CHART=/path/kargo-1.12.1.tgz` (from `helm pull`) and
+`CERT_MANAGER_MANIFEST=/path/cert-manager.yaml`.
+
 Pinned versions (change them in `scripts/kargo-install.sh`):
 
 | Component | Version |

@@ -30,7 +30,7 @@ local-server/
 │   └── kargo/        #   Kargo Project / Warehouse / Stage (promotion)
 ├── scripts/          # Automation scripts (shared helpers in scripts/lib.sh)
 ├── tests/            # lint, script unit tests, kind end-to-end test
-├── .github/workflows # CI: runs all of the above on every push / PR
+├── .github/workflows # CI: runs all of the above on pushes to master and on PRs
 └── docs/             # Documentation
 ```
 
@@ -237,11 +237,15 @@ verifies that each database rejects unauthenticated clients, accepts the
 generated credentials, persists data across restarts and runs as non-root;
 that Argo CD and Kargo install and are reachable with their passwords; and
 that the GitOps manifests are accepted by the real CRDs (including that
-the AppProject rejects deployments into `kube-system`). Skip suites with
+the AppProject rejects deployments into `kube-system` and refuses
+`Namespace` objects, while the real `hello-devops-dev` app still syncs);
+and that privileged pods are rejected by Pod Security in the app and
+database namespaces. Skip suites with
 `E2E_SKIP="argocd kargo"`.
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three
-on every push and pull request.
+on pushes to `master` and on pull requests (pushes to other branches without
+a PR are not tested).
 
 ## Prerequisites
 

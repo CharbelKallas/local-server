@@ -7,7 +7,9 @@
 set -eu
 . "$(dirname -- "$0")/lib.sh"
 
-K3S_VERSION="${K3S_VERSION:-v1.36.5+k3s1}"   # keep in sync with docs/k3s.md
+# Keep in sync with docs/k3s.md, and with the Pod Security
+# `enforce-version` (v1.36) on the lab namespaces when bumping the minor.
+K3S_VERSION="${K3S_VERSION:-v1.36.5+k3s1}"
 
 require_vm_running
 
@@ -31,13 +33,6 @@ echo "Starting K3s service..."
 limactl shell "$VM_NAME" -- sudo systemctl start k3s
 
 echo "Waiting for K3s to be ready..."
-# shellcheck disable=SC2016  # expands inside the VM
-limactl shell "$VM_NAME" -- sh -c 'for i in $(seq 1 60); do
-  if sudo k3s kubectl get nodes 2>/dev/null | grep -q " Ready "; then
-    echo "K3s is ready."
-    exit 0
-  fi
-  sleep 2
-done
-echo "K3s did not become ready in time. Check: make k3s-status" >&2
-exit 1'
+# The wait logic lives in its own file (linted like every other script) and
+# is streamed into the VM's shell on stdin.
+limactl shell "$VM_NAME" -- sh -s < "$REPO_ROOT/scripts/vm/k3s-wait-ready.sh"

@@ -11,12 +11,18 @@
 #   - source:       only the hello-devops repository
 #   - destinations: only the hello-devops-dev / hello-devops-staging
 #                   namespaces of this cluster
-#   - cluster-scoped resources: only Namespace (needed by the
-#                   CreateNamespace=true sync option)
+#   - cluster-scoped resources: none — not even Namespace. Whitelisting
+#                   Namespace (which CreateNamespace=true requires) would let
+#                   the repo commit a manifest for any existing namespace
+#                   (e.g. kube-system), relabel it, and — with prune — delete
+#                   it once the manifest is removed. The two app namespaces
+#                   are created by this repo instead
+#                   (hello-devops-namespaces.yaml).
 #   - namespaced resources that change the namespace's own guardrails
-#     (quotas, limit ranges, network policies) are denied.
+#     (quotas, limit ranges, network policies) or hand-wire Service
+#     endpoints to pods elsewhere (Endpoints, EndpointSlice) are denied.
 #
-# Must exist before the Applications that reference it.
+# Apply it (and hello-devops-namespaces.yaml) before the Applications.
 # Status: configuration only — not applied to the cluster.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -32,9 +38,8 @@ spec:
       namespace: hello-devops-dev
     - server: https://kubernetes.default.svc
       namespace: hello-devops-staging
-  clusterResourceWhitelist:
-    - group: ""
-      kind: Namespace
+  # Empty list = no cluster-scoped resources may be deployed from the repo.
+  clusterResourceWhitelist: []
   namespaceResourceBlacklist:
     - group: ""
       kind: ResourceQuota
@@ -42,3 +47,10 @@ spec:
       kind: LimitRange
     - group: networking.k8s.io
       kind: NetworkPolicy
+    # Hand-written endpoints let a selector-less Service point at pods in
+    # OTHER namespaces (e.g. the databases) and publish them on a NodePort,
+    # which Lima forwards to the Mac. Services must select their own pods.
+    - group: ""
+      kind: Endpoints
+    - group: discovery.k8s.io
+      kind: EndpointSlice

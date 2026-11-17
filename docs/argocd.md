@@ -131,9 +131,33 @@ different path (`dev` / `staging`) of the external `hello-devops`
 repository with automated sync into its own namespace
 (`hello-devops-dev` / `hello-devops-staging`). They contain documented
 resolved repository URL/branch, use the dedicated, restricted AppProject
-`hello-devops` (`kubernetes/argocd/projects/`), and have **not been
+`hello-devops` (`kubernetes/argocd/projects/`, which also holds the two
+destination namespaces this repo owns), carry the
+`resources-finalizer.argocd.argoproj.io` finalizer (deleting an
+Application also deletes what it deployed), and have **not been
 applied**. See [gitops.md](gitops.md) for the two-repository design and
 the full future setup sequence.
+
+## Removing Applications (finalizer)
+
+The hello-devops Applications carry the `resources-finalizer.argocd.argoproj.io`
+finalizer: deleting an Application first deletes everything it deployed.
+That needs a running Argo CD, so **delete Applications before Argo CD or
+their AppProject**:
+
+```sh
+kubectl delete -f kubernetes/argocd/applications/   # waits for the cascade
+kubectl delete -f kubernetes/argocd/projects/       # project + namespaces
+```
+
+If Argo CD was removed first, the Applications hang in `Terminating`.
+Clear the finalizer by hand (this leaves their workloads behind — delete
+those separately):
+
+```sh
+kubectl -n argocd patch application hello-devops-dev --type=merge \
+  -p '{"metadata":{"finalizers":null}}'
+```
 
 ## Install / Re-run
 
@@ -143,6 +167,9 @@ make argocd-install
 
 # Upgrade: bump ARGOCD_VERSION in scripts/argocd-install.sh, then
 make argocd-install
+
+# Offline: install from a local copy of the same pinned manifest
+ARGOCD_MANIFEST=/path/to/install.yaml make argocd-install
 ```
 
 ## Troubleshooting

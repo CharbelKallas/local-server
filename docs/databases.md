@@ -21,6 +21,7 @@
 kubernetes/
 └── databases/
     ├── kustomization.yaml    # `kubectl apply -k` entry point (orders the namespace first)
+    ├── app-users-job.yaml    # Job: creates/updates the least-privilege hello-devops users
     ├── namespace.yaml        # one shared namespace: "databases"
     ├── postgres/
     │   ├── deployment.yaml   # workload: 1 replica, image, resources, volume mount
@@ -50,7 +51,10 @@ Each database is exactly three simple objects (plus a credentials
   `ReadWriteOnce` volume before its replacement starts. Containers run
   as the image's unprivileged user (no root, all capabilities dropped,
   no privilege escalation, `RuntimeDefault` seccomp) and get no
-  Kubernetes API token.
+  Kubernetes API token. The `databases` namespace enforces the
+  `restricted` Pod Security profile, so a privileged pod (which could read
+  every volume via `hostPath`) is rejected there — run debug/client pods
+  from another namespace.
 - **Service** (ClusterIP) — stable in-cluster DNS name and port.
 - **PersistentVolumeClaim** (1 GiB, `local-path`) — durable storage.
 
@@ -76,7 +80,28 @@ make databases-password    # print the credentials
 
 Applying the manifests without the script (`kubectl apply -k
 kubernetes/databases/`, or an Argo CD Application) works too, but the pods
-stay in `CreateContainerConfigError` until the three Secrets exist.
+— and the app-user Job — stay in `CreateContainerConfigError` until the
+four Secrets exist: `postgres-credentials`, `mongodb-credentials`,
+`redis-credentials` and `hello-devops-app-db`. Whatever creates them (the
+script, or a secret manager on a pure GitOps path) is mandatory; the
+app-user provisioning itself then happens declaratively via the Job.
+
+Secrets in namespace `databases` (all values plain text before base64):
+
+| Secret | Key | Content |
+|--------|-----|---------|
+| `postgres-credentials` | `password` | PostgreSQL superuser (`postgres`) password |
+| `mongodb-credentials` | `username`, `password` | MongoDB root user name and password |
+| `redis-credentials` | `password` | Redis default-user password |
+| | `redis.conf` | `requirepass <password>` on line 1, then `user hello-devops on ><app password> ~* &* +@all -@admin -@dangerous` |
+| `hello-devops-app-db` | `postgres-password`, `mongodb-password` | passwords the Job sets for the `hello_devops` / `hello-devops` users |
+
+The Job (`hello-devops-db-users`) removes itself 10 minutes after
+finishing. With plain `kubectl apply -k` inside that window, delete it
+first (`kubectl -n databases delete job hello-devops-db-users`) — a
+finished Job cannot be changed. `make databases-status` shows its last
+state while it exists. Under Argo CD it runs as a `PostSync` hook, after
+the databases are synced and healthy.
 
 Because this repo is already GitOps-based, the same manifests can later
 be deployed by pointing an **Argo CD Application** at
@@ -122,8 +147,31 @@ mongosh "mongodb://root:...@127.0.0.1:27017/?authSource=admin"
 REDISCLI_AUTH=... redis-cli -h 127.0.0.1
 ```
 
-Applications in the cluster should read the password from the
-corresponding Secret (`secretKeyRef`) rather than copying it.
+These are **operator** (superuser) credentials. Applications get their own
+least-privilege users instead. They are created and updated by the Job
+[`app-users-job.yaml`](../kubernetes/databases/app-users-job.yaml), which
+`make databases-install` re-runs every time (and Argo CD would run after
+every sync, as a `PostSync` hook). It reads all passwords from Secrets, so nothing
+secret is in Git or on a command line:
+
+| Database | App user | May | May not |
+|----------|----------|-----|---------|
+| PostgreSQL | `hello_devops` | connect to `lab` (only), temporary tables there, create/use tables in schema `public` | connect to other databases, create roles/databases, read password hashes, act as superuser |
+| MongoDB | `hello-devops` (`authSource=hello-devops`) | `readWrite` on database `hello-devops` | touch any other database, manage users |
+| Redis | `hello-devops` (ACL user) | data commands | `@admin` / `@dangerous` commands (`CONFIG`, `FLUSHALL`, `KEYS`, `ACL`, ...) |
+
+Their credentials are published as Secret `hello-devops-db-credentials`
+(keys `PGUSER`, `PGPASSWORD`, `MONGODB_URI`, `REDIS_USERNAME`,
+`REDIS_PASSWORD`) in the `hello-devops-dev` and `hello-devops-staging`
+namespaces, when those exist (`kubectl apply -f kubernetes/argocd/projects/`,
+then re-run `make databases-install`).
+
+> **hello-devops does not consume them yet.** Its committed config still
+> sets `PGUSER=postgres`, a credential-less `MONGODB_URI`, and has no Redis
+> username/password setting, so it cannot authenticate against these
+> databases until it is changed to read `hello-devops-db-credentials`
+> (e.g. `envFrom` the Secret, plus Redis `username`/`password` support).
+> That change belongs in the hello-devops repository.
 
 ### Rotating a Password
 
@@ -137,6 +185,13 @@ re-run `make databases-install` and restart the pod:
 ```sh
 kubectl -n databases rollout restart deploy/postgres deploy/mongodb deploy/redis
 ```
+
+**Application users** (`APP_*` keys) rotate without manual SQL: change the
+value in `secrets/databases.env` (or delete the line to have a new one
+generated) and re-run `make databases-install`. It updates the Postgres
+role and the MongoDB user, rewrites Redis's ACL (and restarts Redis), and
+refreshes `hello-devops-db-credentials` in the app namespaces; restart the
+application pods so they pick up the new Secret.
 
 ### Upgrading from the No-Auth Setup
 

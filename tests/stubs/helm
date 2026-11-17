@@ -2,6 +2,11 @@
 # Test stub for helm. Logs the call and, for --values files, their path
 # and contents (on CONTENT lines, kept apart from argv).
 echo "helm $*" >> "$STUB_LOG"
+if [ "${1:-}" = show ] && [ "${2:-}" = chart ]; then
+  # STUB_CHART_VERSION: version reported by a local chart.
+  printf 'apiVersion: v2\nname: kargo\nversion: %s\n' "${STUB_CHART_VERSION:-1.12.1}"
+  exit 0
+fi
 prev=""
 for a in "$@"; do
   if [ "$prev" = "--values" ] || [ "$prev" = "-f" ]; then

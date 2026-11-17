@@ -4,7 +4,8 @@
 # the old "apply namespace.yaml first" ordering workaround is not needed.
 #
 # The credential Secrets (postgres-credentials, mongodb-credentials,
-# redis-credentials) are deliberately NOT part of this kustomization: they
+# redis-credentials, hello-devops-app-db) are deliberately NOT part of this
+# kustomization: they
 # are generated locally by scripts/databases-install.sh into the gitignored
 # secrets/ directory and created in the cluster from there. Real secrets
 # never go into Git.
@@ -21,3 +22,5 @@ resources:
   - redis/pvc.yaml
   - redis/service.yaml
   - redis/deployment.yaml
+  # Creates/updates the hello-devops app users (needs the Secrets below).
+  - app-users-job.yaml

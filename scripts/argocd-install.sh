@@ -13,9 +13,23 @@ set -eu
 NAMESPACE="argocd"
 NODE_PORT="30080"
 ARGOCD_VERSION="${ARGOCD_VERSION:-v3.6.1}"   # keep in sync with docs/argocd.md
-MANIFEST_URL="https://raw.githubusercontent.com/argoproj/argo-cd/$ARGOCD_VERSION/manifests/install.yaml"
+# ARGOCD_MANIFEST may point at a local copy of the same file (offline
+# installs, or the e2e test reusing its one download).
+MANIFEST="${ARGOCD_MANIFEST:-https://raw.githubusercontent.com/argoproj/argo-cd/$ARGOCD_VERSION/manifests/install.yaml}"
 
 require_cluster
+
+# A local override must be the pinned release, or it would silently up- or
+# downgrade Argo CD (possibly across a major version) while this script
+# reports $ARGOCD_VERSION.
+case "$MANIFEST" in
+  http://* | https://*) ;;
+  *)
+    [ -r "$MANIFEST" ] || die "ARGOCD_MANIFEST '$MANIFEST' is not a readable file."
+    grep -q "image: quay.io/argoproj/argocd:$ARGOCD_VERSION\$" "$MANIFEST" \
+      || die "ARGOCD_MANIFEST '$MANIFEST' is not the Argo CD $ARGOCD_VERSION install manifest."
+    ;;
+esac
 
 echo "Creating namespace '$NAMESPACE' (if missing)..."
 kc create namespace "$NAMESPACE" --dry-run=client -o yaml | kc apply -f -
@@ -25,7 +39,7 @@ echo "Installing Argo CD $ARGOCD_VERSION (official manifests)..."
 # last-applied-configuration annotation limit of client-side apply.
 # --force-conflicts takes field ownership from an earlier client-side
 # apply (a no-op on a fresh install).
-kc apply --server-side --force-conflicts -n "$NAMESPACE" -f "$MANIFEST_URL"
+kc apply --server-side --force-conflicts -n "$NAMESPACE" -f "$MANIFEST"
 
 # Expose the UI via NodePort. A strategic-merge patch matches the port by
 # its port number (443), so it neither depends on the order of ports in the

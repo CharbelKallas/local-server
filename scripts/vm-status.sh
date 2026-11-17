@@ -9,10 +9,11 @@ echo "== Lima instances =="
 limactl list
 
 echo
-if ! vm_exists; then
+status=$(vm_status)
+if [ -z "$status" ]; then
   echo "VM '$VM_NAME' does not exist yet. Run: make vm-start"
-elif [ "$(vm_status)" != "Running" ]; then
-  echo "VM '$VM_NAME' is $(vm_status). Run: make vm-start"
+elif [ "$status" != "Running" ]; then
+  echo "VM '$VM_NAME' is $status. Run: make vm-start"
 else
   echo "== VM '$VM_NAME' details =="
   # shellcheck disable=SC2016  # expands inside the VM

@@ -5,12 +5,13 @@ set -eu
 
 require_cmd limactl
 
-if ! vm_exists; then
+status=$(vm_status)
+if [ -z "$status" ]; then
   echo "VM '$VM_NAME' does not exist. Nothing to stop."
   exit 0
 fi
 
-if [ "$(vm_status)" != "Running" ]; then
+if [ "$status" != "Running" ]; then
   echo "VM '$VM_NAME' is not running. Nothing to stop."
   exit 0
 fi

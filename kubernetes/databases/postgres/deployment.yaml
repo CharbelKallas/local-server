@@ -62,12 +62,17 @@ spec:
               command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "lab"]
             periodSeconds: 5
             timeoutSeconds: 3
+          # Liveness is a TCP check, not pg_isready: during crash recovery
+          # (e.g. after an unclean VM shutdown) pg_isready reports "rejecting
+          # connections" for as long as recovery takes, and killing the
+          # container then restarts recovery from scratch. The postmaster
+          # accepts TCP connections throughout, so this only fails when the
+          # server is really gone.
           livenessProbe:
-            exec:
-              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "lab"]
+            tcpSocket:
+              port: postgres
             initialDelaySeconds: 30
             periodSeconds: 10
-            timeoutSeconds: 5
             failureThreshold: 6
           resources:
             requests:

@@ -17,6 +17,10 @@ case "$args" in
   "config get-contexts -o name")
     printf '%s\n' "$STUB_CONTEXTS"
     ;;
+  "get deploy -n cert-manager cert-manager")
+    # STUB_CERT_MANAGER_MISSING=1 makes kargo-install.sh install it.
+    [ "${STUB_CERT_MANAGER_MISSING:-0}" = 1 ] && exit 1
+    ;;
   "get nodes")
     exit "${STUB_NODES_RC:-0}"
     ;;
@@ -30,6 +34,7 @@ case "$args" in
     printf '%s' "$STUB_SECRET_B64"
     ;;
   "get pvc -n databases -o name")
+    [ "${STUB_PVC_RC:-0}" = 0 ] || { echo "error: the server is unavailable" >&2; exit "$STUB_PVC_RC"; }
     [ -n "${STUB_PVCS:-}" ] && printf '%s\n' "$STUB_PVCS"
     ;;
   "create secret generic "*)
@@ -43,7 +48,8 @@ case "$args" in
           spec=${a#--from-file=}
           key=${spec%%=*}
           path=${spec#*=}
-          echo "CONTENT secret $name $key=$(cat "$path")" >> "$STUB_LOG"
+          # Newlines become "|" so multi-line files stay on one CONTENT line.
+          echo "CONTENT secret $name $key=$(tr '\n' '|' < "$path")" >> "$STUB_LOG"
           ;;
       esac
     done
@@ -51,6 +57,20 @@ case "$args" in
     ;;
   *"apply"*" -f -"*|*"apply -f -")
     cat > /dev/null
+    # STUB_APPLY_ACTION (created/configured/unchanged) emulates kubectl's
+    # "secret/<name> <action>" output.
+    [ -z "${STUB_APPLY_ACTION:-}" ] || echo "secret/stub $STUB_APPLY_ACTION"
+    ;;
+  "get job hello-devops-db-users -n databases"*)
+    # STUB_JOB_STATE: Complete (default), Failed, or absent (NotFound).
+    [ "${STUB_JOB_STATE:-Complete}" = absent ] && { echo "Error from server (NotFound)" >&2; exit 1; }
+    case "$args" in
+      *metadata.name*) echo "hello-devops-db-users ${STUB_JOB_STATE:-Complete}" ;;
+      *) echo "${STUB_JOB_STATE:-Complete}" ;;
+    esac
+    ;;
+  "logs job/hello-devops-db-users"*)
+    echo "MongoServerError: Authentication failed."
     ;;
 esac
 exit 0

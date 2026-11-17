@@ -13,8 +13,13 @@ cd "$REPO_ROOT"
 
 SHELLCHECK_IMAGE="koalaman/shellcheck:v0.10.0"
 KUBECONFORM_IMAGE="ghcr.io/yannh/kubeconform:v0.6.7"
-K8S_VERSION="1.33.0"   # schema version; lab runs a newer K3s, schemas are stable
-CRD_SCHEMAS='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+# Schemas are pinned to commits so lint results only change when this repo
+# does (bump deliberately). K8S_VERSION matches the lab's K3s minor version.
+K8S_VERSION="1.36.0"
+K8S_SCHEMAS_SHA="2bfaff3898a7a4fa4e4760da3d2656211c9b4c71"   # yannh/kubernetes-json-schema
+CRD_CATALOG_SHA="89c736bdde38b5fecd0f8436ec5f3aa3679a3b86"   # datreeio/CRDs-catalog
+K8S_SCHEMAS="https://raw.githubusercontent.com/yannh/kubernetes-json-schema/$K8S_SCHEMAS_SHA/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json"
+CRD_SCHEMAS="https://raw.githubusercontent.com/datreeio/CRDs-catalog/$CRD_CATALOG_SHA/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
 
 run_tool() {
   tool=$1 image=$2
@@ -43,5 +48,5 @@ manifests=$(git ls-files --cached --others --exclude-standard 'kubernetes/*.yaml
 # shellcheck disable=SC2086
 run_tool kubeconform "$KUBECONFORM_IMAGE" -strict -summary \
   -kubernetes-version "$K8S_VERSION" \
-  -schema-location default -schema-location "$CRD_SCHEMAS" \
+  -schema-location "$K8S_SCHEMAS" -schema-location "$CRD_SCHEMAS" \
   $manifests
