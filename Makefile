@@ -1,4 +1,10 @@
-.PHONY: help vm-start vm-stop vm-status vm-ssh k3s-start k3s-stop k3s-status argocd-install argocd-status argocd-password argocd-ui kargo-install kargo-status kargo-password
+.DEFAULT_GOAL := help
+
+.PHONY: help vm-start vm-stop vm-status vm-ssh k3s-start k3s-stop k3s-status \
+        argocd-install argocd-status argocd-password argocd-ui \
+        kargo-install kargo-status kargo-password \
+        databases-install databases-status databases-password \
+        lint test test-e2e
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -15,7 +21,7 @@ vm-status: ## Show Linux VM status
 vm-ssh: ## Open a shell on the Linux VM
 	@scripts/vm-ssh.sh
 
-k3s-start: ## Start K3s service inside the VM
+k3s-start: ## Start K3s service inside the VM (installs the pinned version if missing)
 	@scripts/k3s-start.sh
 
 k3s-stop: ## Stop K3s service inside the VM
@@ -24,7 +30,7 @@ k3s-stop: ## Stop K3s service inside the VM
 k3s-status: ## Show K3s cluster status (nodes and system pods)
 	@scripts/k3s-status.sh
 
-argocd-install: ## Install Argo CD into K3s (idempotent, UI on NodePort 30080)
+argocd-install: ## Install Argo CD into K3s (pinned version, idempotent, UI on NodePort 30080)
 	@scripts/argocd-install.sh
 
 argocd-status: ## Show Argo CD status and UI address
@@ -44,3 +50,21 @@ kargo-status: ## Show Kargo status and UI address
 
 kargo-password: ## Print the Kargo admin account password
 	@scripts/kargo-password.sh
+
+databases-install: ## Deploy PostgreSQL, MongoDB and Redis with generated passwords (idempotent)
+	@scripts/databases-install.sh
+
+databases-status: ## Show database workloads, pods, services and volumes
+	@scripts/databases-status.sh
+
+databases-password: ## Print the database credentials
+	@scripts/databases-password.sh
+
+lint: ## Lint shell scripts (shellcheck) and validate manifests (kubeconform)
+	@tests/lint.sh
+
+test: lint ## Run lint plus the script unit tests (no cluster needed)
+	@tests/scripts_test.sh
+
+test-e2e: ## End-to-end test in a throwaway kind cluster (needs Docker)
+	@tests/e2e.sh

@@ -8,3 +8,17 @@ metadata:
   name: databases
   labels:
     app.kubernetes.io/part-of: local-devops-lab
+    # Pod Security Admission: all three databases run non-root with no
+    # capabilities and RuntimeDefault seccomp, i.e. they meet "restricted".
+    # Enforcing it turns a regression (or a stray privileged debug pod that
+    # could read every volume via hostPath) into an admission error.
+    # Debug from another namespace, as the database clients do.
+    pod-security.kubernetes.io/enforce: restricted
+    # Pinned to the lab's Kubernetes minor so a K3s upgrade can't tighten
+    # the enforced policy unannounced; warn/audit track "latest" to show
+    # upcoming changes. Bump together with K3S_VERSION.
+    pod-security.kubernetes.io/enforce-version: v1.36
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

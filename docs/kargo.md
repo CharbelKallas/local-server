@@ -31,19 +31,19 @@ Kargo is installed in the existing K3s cluster, in its own namespace `kargo`,
 using the official Helm chart (this is Kargo's standard installation method):
 
 ```sh
-helm upgrade --install kargo oci://ghcr.io/akuity/kargo-charts/kargo \
+helm --kube-context k3s-lab upgrade --install kargo oci://ghcr.io/akuity/kargo-charts/kargo \
   --namespace kargo --create-namespace \
   --version 1.12.1 \
-  --set-string api.adminAccount.passwordHash=... \
-  --set-string api.adminAccount.tokenSigningKey=... \
-  --set api.service.type=NodePort \
-  --set api.service.nodePort=30090 \
+  --values <private temp file with api.adminAccount.* and api.service.*> \
   --wait
 ```
 
 > The password hash and token signing key are **mandatory** chart values with
 > no defaults. `scripts/kargo-install.sh` generates them once and keeps them
-> in `secrets/kargo-admin.env` (already gitignored), so re-runs are stable.
+> in `secrets/kargo-admin.env` (gitignored, mode `600`), so re-runs are
+> stable. They are passed to Helm in a temporary values file that only your
+> user can read and that is deleted afterwards — not with `--set`, which
+> would expose them to every local process via `ps`.
 
 Installed components (all in namespace `kargo`):
 
@@ -60,7 +60,7 @@ Also installed:
 - **11 CRDs** (`*.kargo.akuity.io`): `projects`, `warehouses`, `freights`,
   `stages`, `promotions`, `promotionrequests`, `promotiontasks`,
   `clusterpromotiontasks`, `clusterconfigs`, `projectconfigs`, `targets`
-- **cert-manager v1.21.2** in namespace `cert-manager` — a **prerequisite** of
+- **cert-manager v1.21.3** in namespace `cert-manager` — a **prerequisite** of
   Kargo's default configuration: it issues the self-signed TLS certificates
   used by the API server and webhook servers. Installed by
   `scripts/kargo-install.sh` only if missing; left untouched otherwise.
@@ -196,12 +196,22 @@ make kargo-status
 make kargo-password
 ```
 
-Pinned versions (change them in `scripts/kargo-install.sh`):
+Offline / mirrored installs: point the script at other copies of the same
+pinned artifacts — `KARGO_CHART=/path/kargo-1.12.1.tgz` (from `helm pull`)
+or another chart reference such as `mirror/kargo` (pulled at the pinned
+version), and `CERT_MANAGER_MANIFEST=/path/cert-manager.yaml` (a file or
+an `https://` URL). The chart package and the cert-manager manifest —
+including the default downloads — must match the pinned sha256
+(`CHART_SHA256`, `CERT_MANAGER_SHA256`), otherwise they are refused.
+
+Pinned versions (change them in `scripts/kargo-install.sh`, together with
+`CHART_SHA256` / `CERT_MANAGER_SHA256`, the sha256 of the new chart
+package / manifest):
 
 | Component | Version |
 |-----------|---------|
 | Kargo Helm chart / app | `1.12.1` / `v1.12.1` |
-| cert-manager | `v1.21.2` |
+| cert-manager | `v1.21.3` |
 
 ## Troubleshooting
 

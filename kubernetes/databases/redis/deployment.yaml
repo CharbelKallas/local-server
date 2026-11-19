@@ -1,9 +1,14 @@
 # Redis — single replica, deliberately simple.
-# - "redis-server --appendonly yes --dir /data" turns on AOF
-#   persistence so cached/queued data survives restarts.
+# - AOF persistence ("--appendonly yes --dir /data") so cached/queued
+#   data survives restarts.
+# - Password protected: the Secret "redis-credentials" (created by
+#   scripts/databases-install.sh, never stored in Git) carries a tiny
+#   config file with the "requirepass" line. It is passed to redis-server
+#   as its config file, so the password never shows up in the process
+#   arguments.
 # - strategy "Recreate" keeps one pod attached to the ReadWriteOnce
 #   volume at a time.
-# - No password configured: local learning lab only.
+# - Runs as the image's unprivileged "redis" user (uid 999).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,19 +28,51 @@ spec:
       labels:
         app: redis
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: redis
           image: redis:7.4-alpine
           command:
             - redis-server
           args:
+            - /etc/redis/auth/redis.conf
             - --appendonly
             - "yes"
             - --dir
             - /data
+          env:
+            # Used by the probe below; redis-cli reads REDISCLI_AUTH so the
+            # password is not passed on the command line.
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: password
           ports:
             - name: redis
               containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli ping | grep -qx PONG"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
           resources:
             requests:
               cpu: 50m
@@ -46,7 +83,17 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: auth
+              mountPath: /etc/redis/auth
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: redis-data
+        - name: auth
+          secret:
+            secretName: redis-credentials
+            defaultMode: 0440
+            items:
+              - key: redis.conf
+                path: redis.conf

@@ -1,0 +1,173 @@
+# Creates/updates the least-privilege hello-devops database users.
+#
+# Declarative and idempotent, so it works on BOTH deployment paths:
+#   - `make databases-install` deletes and re-applies it on every run;
+#   - Argo CD (if it ever manages kubernetes/databases/) runs it after every
+#     sync as a PostSync hook — i.e. once the databases are synced and
+#     healthy — recreating it first (BeforeHookCreation).
+# A finished run removes itself after 10 minutes (ttlSecondsAfterFinished),
+# so a plain `kubectl apply -k` later creates a fresh run instead of failing
+# on the immutable old Job. Within those 10 minutes, delete it first:
+#   kubectl -n databases delete job hello-devops-db-users
+# Re-running is how app passwords are rotated: change the Secret, re-run.
+#
+# Every password comes from a Secret via secretKeyRef — never from Git, and
+# never on a command line:
+#   postgres-credentials / mongodb-credentials  operator (superuser) logins
+#   hello-devops-app-db                         the app users' passwords
+# All three are created by scripts/databases-install.sh (or, on a pure
+# GitOps path, by a secret manager). The Redis app user needs no Job: its
+# ACL line is part of redis-credentials/redis.conf.
+#
+# The containers wait (up to 10 minutes) for their database themselves, so
+# the Job can be applied together with the Deployments — a first install
+# that is still pulling database images does not exhaust its retries.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hello-devops-db-users
+  namespace: databases
+  labels:
+    app: hello-devops-db-users
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: hello-devops-db-users
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          securityContext:
+            runAsUser: 70
+            runAsGroup: 70
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: PGHOST
+              value: postgres
+            - name: PGUSER
+              value: postgres
+            - name: PGDATABASE
+              value: lab
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hello-devops-app-db
+                  key: postgres-password
+          # The SQL goes to psql on stdin via a heredoc, so the password is
+          # never in any argv. It is not spliced into the SQL text by the
+          # shell either: psql reads it from the environment (\getenv) and
+          # :'app_password' quotes it as a literal, so any character is safe.
+          # Terse errors and log_min_error_statement=panic keep a failing
+          # statement (which would contain the password) out of the Job's
+          # and the server's logs. `\$\$` becomes the `$$` of the DO block
+          # (a bare `$$` would be eaten by Kubernetes' own $(VAR) expansion).
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              # Wall-clock deadline (not an attempt count: each pg_isready can
+              # itself take up to its -t timeout), matching the Mongo container.
+              deadline=$(( $(date +%s) + 600 ))
+              until pg_isready -q -t 3; do
+                [ "$(date +%s)" -lt "$deadline" ] || { echo "PostgreSQL not reachable after 10 minutes" >&2; exit 1; }
+                sleep 2
+              done
+              psql -q -v ON_ERROR_STOP=1 -v VERBOSITY=terse <<SQL
+              \getenv app_password APP_PASSWORD
+              SET log_min_error_statement = panic;
+              DO \$\$ BEGIN
+                IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'hello_devops') THEN
+                  CREATE ROLE hello_devops;
+                END IF;
+              END \$\$;
+              ALTER ROLE hello_devops WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+                PASSWORD :'app_password';
+              -- PUBLIC (every role) may connect to, and create temp tables in,
+              -- every database by default. Take that away so the app user
+              -- reaches "lab" only — where it may connect, use temp tables,
+              -- and create/use tables in schema public.
+              REVOKE CONNECT, TEMPORARY ON DATABASE postgres, template1, lab FROM PUBLIC;
+              GRANT CONNECT, TEMPORARY ON DATABASE lab TO hello_devops;
+              GRANT USAGE, CREATE ON SCHEMA public TO hello_devops;
+              SQL
+              echo "PostgreSQL user hello_devops provisioned."
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+        - name: mongodb
+          image: mongo:8.0
+          securityContext:
+            runAsUser: 999
+            runAsGroup: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-credentials
+                  key: username
+            - name: ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-credentials
+                  key: password
+            - name: APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hello-devops-app-db
+                  key: mongodb-password
+          # --eval exits non-zero on an uncaught error; credentials are read
+          # from the environment inside the script, not passed as arguments.
+          command:
+            - mongosh
+            - --quiet
+            - --nodb
+            - --eval
+            - |
+              const deadline = Date.now() + 600000;  // 10 minutes
+              let admin;
+              for (;;) {
+                try {
+                  admin = new Mongo('mongodb://mongodb:27017').getDB('admin');
+                  const res = admin.auth(process.env.ROOT_USER, process.env.ROOT_PASSWORD);
+                  if (!res || res.ok !== 1) throw new Error('authentication as root failed');
+                  break;
+                } catch (e) {
+                  if (Date.now() > deadline) throw e;
+                  sleep(2000);
+                }
+              }
+              const appDb = admin.getSiblingDB('hello-devops');
+              const roles = [{ role: 'readWrite', db: 'hello-devops' }];
+              if (appDb.getUser('hello-devops')) {
+                appDb.updateUser('hello-devops', { pwd: process.env.APP_PASSWORD, roles: roles });
+              } else {
+                appDb.createUser({ user: 'hello-devops', pwd: process.env.APP_PASSWORD, roles: roles });
+              }
+              print('MongoDB user hello-devops provisioned.');
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+            # mongosh is a Node.js process; 256Mi risked OOM kills.
+            limits: {cpu: 500m, memory: 512Mi}

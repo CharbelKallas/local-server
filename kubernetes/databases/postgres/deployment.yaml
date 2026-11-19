@@ -2,8 +2,12 @@
 # - strategy "Recreate" ensures the old pod stops before a new one
 #   mounts the same ReadWriteOnce volume (two PostgreSQL instances
 #   must never share the data directory).
-# - POSTGRES_HOST_AUTH_METHOD=trust disables password auth; this is a
-#   local learning lab only. Move to a Secret-based password later.
+# - Password authentication (scram-sha-256, the image default once a
+#   password is set). The superuser password comes from the Secret
+#   "postgres-credentials", created by scripts/databases-install.sh —
+#   it is never stored in Git.
+# - Runs as the image's unprivileged "postgres" user (uid/gid 70 in the
+#   alpine image) with no extra Linux capabilities.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,6 +27,14 @@ spec:
       labels:
         app: postgres
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           image: postgres:17-alpine
@@ -32,10 +44,36 @@ spec:
           env:
             - name: POSTGRES_DB
               value: lab
-            - name: POSTGRES_HOST_AUTH_METHOD
-              value: trust
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "lab"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          # Liveness is a TCP check, not pg_isready: during crash recovery
+          # (e.g. after an unclean VM shutdown) pg_isready reports "rejecting
+          # connections" for as long as recovery takes, and killing the
+          # container then restarts recovery from scratch. The postmaster
+          # accepts TCP connections throughout, so this only fails when the
+          # server is really gone.
+          livenessProbe:
+            tcpSocket:
+              port: postgres
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
           resources:
             requests:
               cpu: 100m
