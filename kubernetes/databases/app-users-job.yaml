@@ -72,10 +72,14 @@ spec:
                 secretKeyRef:
                   name: hello-devops-app-db
                   key: postgres-password
-          # The SQL goes to psql on stdin via a heredoc expanded by the
-          # shell, so the password is never in any argv. `\$\$` becomes the
-          # `$$` of the DO block (a bare `$$` would be eaten by Kubernetes'
-          # own $(VAR) expansion).
+          # The SQL goes to psql on stdin via a heredoc, so the password is
+          # never in any argv. It is not spliced into the SQL text by the
+          # shell either: psql reads it from the environment (\getenv) and
+          # :'app_password' quotes it as a literal, so any character is safe.
+          # Terse errors and log_min_error_statement=panic keep a failing
+          # statement (which would contain the password) out of the Job's
+          # and the server's logs. `\$\$` becomes the `$$` of the DO block
+          # (a bare `$$` would be eaten by Kubernetes' own $(VAR) expansion).
           command:
             - sh
             - -c
@@ -88,14 +92,16 @@ spec:
                 [ "$(date +%s)" -lt "$deadline" ] || { echo "PostgreSQL not reachable after 10 minutes" >&2; exit 1; }
                 sleep 2
               done
-              psql -q -v ON_ERROR_STOP=1 <<SQL
+              psql -q -v ON_ERROR_STOP=1 -v VERBOSITY=terse <<SQL
+              \getenv app_password APP_PASSWORD
+              SET log_min_error_statement = panic;
               DO \$\$ BEGIN
                 IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'hello_devops') THEN
                   CREATE ROLE hello_devops;
                 END IF;
               END \$\$;
               ALTER ROLE hello_devops WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
-                PASSWORD '${APP_PASSWORD}';
+                PASSWORD :'app_password';
               -- PUBLIC (every role) may connect to, and create temp tables in,
               -- every database by default. Take that away so the app user
               -- reaches "lab" only — where it may connect, use temp tables,

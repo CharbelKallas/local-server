@@ -11,6 +11,7 @@ CRED_FILE="$SECRETS_DIR/kargo-admin.env"
 
 [ -f "$CRED_FILE" ] || die "No Kargo credentials found. Run: make kargo-install"
 
+clear_kargo_credentials
 # shellcheck disable=SC1090
 . "$CRED_FILE"
 

@@ -6,7 +6,10 @@ K3s runs inside the Linux VM managed by Lima (instance name: `k3s`).
 
 - **VM OS:** Ubuntu 24.04 LTS (arm64)
 - **K3s version:** v1.36.5+k3s1 (pinned in `scripts/k3s-start.sh` as
-  `K3S_VERSION`; a fresh install or VM rebuild gets exactly this version)
+  `K3S_VERSION`; a fresh install or VM rebuild gets exactly this version).
+  The installer is that release's `install.sh` (not the moving
+  `get.k3s.io` one) and must match `K3S_INSTALLER_SHA256`; update both
+  when bumping the version
 - **Node name:** `lima-k3s`
 - **Service:** `systemd` unit `k3s` inside the VM
 

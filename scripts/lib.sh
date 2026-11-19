@@ -62,38 +62,73 @@ gen_secret() {
   openssl rand -base64 48 | tr -d '=+/\n' | head -c "${1:-32}"
 }
 
-# use_pinned_manifest <source> <default URL> <pinned image> <variable name>
-# Sets PINNED_MANIFEST to what should be applied. The default (pinned) URL
-# is used as is. Any override — a local file OR another URL, e.g. a mirror —
-# must contain the pinned image (`image: <ref>`), otherwise this dies: an
-# unverified manifest could silently up- or downgrade the component while
-# the script reports the pinned version. A URL override is downloaded to
-# $PINNED_TMP first (callers remove it on exit) and checked like a file.
+# sha256 of file $1 (sha256sum on Linux, shasum on macOS).
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    die "Neither sha256sum nor shasum found: cannot verify downloads."
+  fi
+}
+
+# use_pinned_manifest <source> <sha256> <variable name>
+# Sets PINNED_MANIFEST to a local file whose sha256 is the pinned one, and
+# dies otherwise. Used for every downloaded artifact (manifests, the K3s
+# installer, the Kargo chart). <source> is the default release URL or an override (a
+# local file, or another https URL such as a mirror). A URL is downloaded
+# to $PINNED_TMP first (callers remove it on exit), over https only — also
+# for redirects — because the result is applied with cluster-admin rights.
+# Comparing the whole file's hash (not a version string inside it) means a
+# modified copy, another release, or a re-tagged upstream file is refused.
 PINNED_MANIFEST=""
 PINNED_TMP=""
 use_pinned_manifest() {
-  src=$1 default=$2 image=$3 var=$4
-  if [ "$src" = "$default" ]; then
-    PINNED_MANIFEST=$src
-    return 0
-  fi
+  src=$1 sha=$2 var=$3
   case "$src" in
-    http://* | https://*)
+    https://*)
+      require_cmd curl
       PINNED_TMP=$(mktemp)
-      curl -fsSL -o "$PINNED_TMP" "$src" || die "$var: could not download '$src'."
+      curl -fsSL --proto =https --proto-redir =https -o "$PINNED_TMP" "$src" \
+        || die "$var: could not download '$src'."
       file=$PINNED_TMP
       ;;
+    *://*) die "$var '$src': only https:// URLs are allowed." ;;
     *)
       [ -r "$src" ] || die "$var '$src' is not a readable file."
       file=$src
       ;;
   esac
-  # Literal match on the image reference (dots escaped); tolerates quotes
-  # and CRLF line endings.
-  image_re=$(printf '%s' "$image" | sed 's/[.]/\\./g')
-  grep -Eq "image: *\"?$image_re\"?[[:space:]]*\$" "$file" \
-    || die "$var '$src' does not contain image $image (not the pinned release)."
+  # Assigned on its own line so a failure (no hash tool) stops `set -e`
+  # callers instead of reading as an empty, "mismatching" hash.
+  actual=$(sha256_of "$file")
+  [ "$actual" = "$sha" ] \
+    || die "$var '$src' has sha256 $actual, expected $sha (not the pinned release, or modified)."
   PINNED_MANIFEST=$file
+}
+
+# Forget database credentials inherited from the caller's environment, so
+# only values from secrets/databases.env (or freshly generated ones) count:
+# an exported REDIS_PASSWORD from another project must never stand in for a
+# key missing from the file.
+clear_db_credentials() {
+  unset POSTGRES_PASSWORD MONGODB_USERNAME MONGODB_PASSWORD REDIS_PASSWORD \
+    APP_POSTGRES_PASSWORD APP_MONGODB_PASSWORD APP_REDIS_PASSWORD
+}
+
+# Database credentials end up in a shell-sourced file, space-separated
+# redis.conf lines and a mongodb:// URI, so they are limited to characters
+# that are literal in all three (RFC 3986 "unreserved"). Generated values
+# are alphanumeric; this catches hand-edited ones. Prints no values.
+check_db_credentials_file() {
+  bad=$(grep -nvE '^(#.*|[A-Z_][A-Z0-9_]*=[A-Za-z0-9._~-]*)?$' "$1" | cut -d: -f1 | tr '\n' ' ')
+  [ -z "$bad" ] || die "$1: line(s) ${bad% } must be KEY=value with values made of A-Z a-z 0-9 . _ ~ - only."
+}
+
+# Same for the Kargo admin credentials (secrets/kargo-admin.env).
+clear_kargo_credentials() {
+  unset KARGO_ADMIN_PASSWORD KARGO_ADMIN_PASSWORD_HASH KARGO_TOKEN_SIGNING_KEY
 }
 
 # Create the gitignored secrets/ directory with owner-only permissions.

@@ -309,7 +309,9 @@ hook=$(kc apply --dry-run=client -f "$REPO_ROOT/kubernetes/databases/app-users-j
   -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/hook}')
 if [ "$ttl" = 600 ] && [ "$hook" = PostSync ]; then pass "Job has ttlSecondsAfterFinished=600 and a PostSync hook"
 else fail "Job ttl='$ttl' hook='$hook'"; fi
-rotated=$(gen_secret 32)
+# Includes a quote and a $(...): the Job must pass it to Postgres verbatim
+# (a value from a secret manager is not limited to [A-Za-z0-9]).
+rotated="$(gen_secret 24)'q\$(x)"
 kc patch secret hello-devops-app-db -n databases --type=merge \
   -p "{\"stringData\":{\"postgres-password\":\"$rotated\"}}" >/dev/null
 kc delete job hello-devops-db-users -n databases --ignore-not-found --wait=true >/dev/null
@@ -319,7 +321,7 @@ if kc wait --for=condition=complete job/hello-devops-db-users -n databases --tim
 else fail "Job did not complete: $(kc logs job/hello-devops-db-users -n databases --all-containers --tail=10 2>&1)"; fi
 out=$(client pg-rotated postgres:17-alpine env PGPASSWORD="$rotated" \
   psql -h postgres.databases.svc -U hello_devops -d lab -tAc "select 'rotated-ok'")
-case "$out" in *rotated-ok*) pass "rotated app password is in effect" ;; *) fail "rotated password rejected: $out" ;; esac
+case "$out" in *rotated-ok*) pass "rotated app password (with quote and \$) is in effect" ;; *) fail "rotated password rejected: $out" ;; esac
 # Restore the script-managed password for the remaining checks.
 "$REPO_ROOT/scripts/databases-install.sh" >/dev/null
 out=$(client pg-restored postgres:17-alpine env PGPASSWORD="$APP_POSTGRES_PASSWORD" \

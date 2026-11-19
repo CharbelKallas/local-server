@@ -37,11 +37,13 @@ trap 'exit 130' INT TERM
 
 # --- credentials (generated once, reused on re-runs) -----------------------
 ensure_secrets_dir
+clear_db_credentials
 fresh_credentials=true
 tmp_cred=$(mktemp "$CRED_FILE.XXXXXX")
 if [ -f "$CRED_FILE" ]; then
   echo "Reusing existing database credentials ($CRED_FILE)."
   fresh_credentials=false
+  check_db_credentials_file "$CRED_FILE"
   cp "$CRED_FILE" "$tmp_cred"
   # A hand-edited file may lack a final newline; without this the first
   # appended key would be glued onto (and corrupt) the last value.

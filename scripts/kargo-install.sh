@@ -30,52 +30,72 @@ set -eu
 NAMESPACE="kargo"
 RELEASE="kargo"
 CHART_VERSION="1.12.1"          # keep in sync with docs/kargo.md
+# sha256 of that chart's package (kargo-1.12.1.tgz) — update with the version.
+CHART_SHA256="d152209bc01fe7577285ecc1803e4dac4832ec6e7a7724a89351dbf799d43d6a"
 CERT_MANAGER_VERSION="v1.21.3"  # keep in sync with docs/kargo.md
+# sha256 of that release's cert-manager.yaml — update together with the version.
+CERT_MANAGER_SHA256="c04a51295adda2b1a775146751f973e787190778c7f35180861d9678876e5c74"
 API_NODE_PORT="30090"
 # Optional other copies of the same pinned artifacts (offline installs, a
-# mirror, or the e2e test reusing its one download), both version-checked:
-# KARGO_CHART = a packaged chart (.tgz from `helm pull`) or another OCI ref,
-# CERT_MANAGER_MANIFEST = a cert-manager.yaml file or URL.
+# mirror, or the e2e test reusing its one download):
+# KARGO_CHART = a packaged chart (.tgz from `helm pull`) or another chart
+#   reference (OCI or `repo/chart`, pulled at --version),
+# CERT_MANAGER_MANIFEST = a cert-manager.yaml file or https URL.
+# Both are sha256-checked, like the defaults.
 CHART="${KARGO_CHART:-oci://ghcr.io/akuity/kargo-charts/kargo}"
 DEFAULT_CERT_MANAGER_MANIFEST="https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml"
 CRED_FILE="$SECRETS_DIR/kargo-admin.env"
 
 require_cluster
 require_cmd helm "Install it first (e.g. brew install helm)."
-
-# --version only applies to a registry chart. A local chart (.tgz) carries
-# its own version, which must be the pinned one: otherwise Helm would
-# silently up- or downgrade Kargo while this script reports $CHART_VERSION.
-version_flag=""
-case "$CHART" in
-  oci://*) version_flag="--version=$CHART_VERSION" ;;
-  *)
-    local_version=$(helm show chart "$CHART" 2>/dev/null | sed -n 's/^version: *//p')
-    [ "$local_version" = "$CHART_VERSION" ] \
-      || die "KARGO_CHART '$CHART' is Kargo chart '${local_version:-unreadable}', expected $CHART_VERSION."
-    ;;
-esac
 require_cmd openssl
 require_cmd htpasswd
 
-# Temp files (credentials, values, a downloaded manifest override) hold
+# Temp files (credentials, values, a downloaded manifest) hold
 # real secrets or unverified downloads: always remove them, even on Ctrl-C. (EXIT
 # does the cleanup; INT/TERM must exit explicitly, or a bare handler would
 # run the cleanup and then let the script carry on.)
 tmp_cred=""
 values_file=""
-cleanup() { rm -f "$tmp_cred" "$values_file" "$PINNED_TMP"; }
+chart_dir=""
+cleanup() {
+  rm -f "$tmp_cred" "$values_file" "$PINNED_TMP"
+  [ -z "$chart_dir" ] || rm -rf "$chart_dir"
+}
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+# --- Kargo chart (pinned by sha256) -----------------------------------------
+# A tag such as 1.12.1 can be re-pushed, so the chart package is fetched
+# first and must match CHART_SHA256 — the same check as for the manifests.
+# A chart reference (the default OCI one, or a mirror) is pulled at the
+# pinned version; a .tgz on disk is checked as it is.
+if [ -e "$CHART" ]; then
+  chart_file=$CHART
+else
+  chart_dir=$(mktemp -d)
+  hc pull "$CHART" --version "$CHART_VERSION" -d "$chart_dir" >/dev/null \
+    || die "KARGO_CHART: could not pull '$CHART' version $CHART_VERSION."
+  chart_file=$(find "$chart_dir" -name '*.tgz' | head -n 1)
+  [ -n "$chart_file" ] || die "KARGO_CHART: pulling '$CHART' produced no chart package."
+fi
+use_pinned_manifest "$chart_file" "$CHART_SHA256" KARGO_CHART
+chart_file=$PINNED_MANIFEST
+
 # --- cert-manager (dependency of Kargo's default configuration) ------------
-if kc get deploy -n cert-manager cert-manager >/dev/null 2>&1; then
+# Only a definite NotFound means "not installed". Any other error (API
+# unreachable, RBAC, timeout) must stop here: treating it as "missing" would
+# force-apply this cert-manager over one that something else manages.
+if cm_probe=$(kc get deploy -n cert-manager cert-manager -o name 2>&1); then
   echo "cert-manager already installed — leaving it untouched."
 else
+  case "$cm_probe" in
+    *NotFound*) ;;
+    *) die "Could not check for an existing cert-manager: $cm_probe" ;;
+  esac
   echo "Installing cert-manager $CERT_MANAGER_VERSION (required by Kargo)..."
   use_pinned_manifest "${CERT_MANAGER_MANIFEST:-$DEFAULT_CERT_MANAGER_MANIFEST}" \
-    "$DEFAULT_CERT_MANAGER_MANIFEST" \
-    "quay.io/jetstack/cert-manager-controller:$CERT_MANAGER_VERSION" CERT_MANAGER_MANIFEST
+    "$CERT_MANAGER_SHA256" CERT_MANAGER_MANIFEST
   # Server-side apply: cert-manager's CRDs exceed the 256 KiB
   # last-applied-configuration annotation limit of client-side apply.
   kc apply --server-side --force-conflicts \
@@ -117,6 +137,7 @@ else
 fi
 chmod 600 "$CRED_FILE"
 
+clear_kargo_credentials
 # shellcheck disable=SC1090
 . "$CRED_FILE"
 
@@ -139,8 +160,7 @@ api:
 VALUES
 
 echo "Installing Kargo $CHART_VERSION (Helm release '$RELEASE', namespace '$NAMESPACE')..."
-# shellcheck disable=SC2086  # empty for a local chart, one word otherwise
-hc upgrade --install "$RELEASE" "$CHART" $version_flag \
+hc upgrade --install "$RELEASE" "$chart_file" \
   --namespace "$NAMESPACE" --create-namespace \
   --values "$values_file" \
   --wait --timeout 10m

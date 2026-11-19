@@ -12,18 +12,19 @@ set -eu
 
 NAMESPACE="argocd"
 NODE_PORT="30080"
-ARGOCD_VERSION="${ARGOCD_VERSION:-v3.6.1}"   # keep in sync with docs/argocd.md
+ARGOCD_VERSION="v3.6.1"   # keep in sync with docs/argocd.md
+# sha256 of that release's install.yaml — update together with the version.
+ARGOCD_MANIFEST_SHA256="7be23ca7d9ca3d3074dee8332f1ca92a933b990cee7c9cf22cf3843ee8c2913e"
 DEFAULT_MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/$ARGOCD_VERSION/manifests/install.yaml"
 
 require_cluster
 
 # ARGOCD_MANIFEST may point at another copy of the same manifest (a local
-# file for offline installs, a mirror URL, or the e2e test's one download).
-# It must be the pinned release — checked by use_pinned_manifest.
+# file for offline installs, an https mirror, or the e2e test's one
+# download). Whatever the source, it must hash to ARGOCD_MANIFEST_SHA256.
 trap 'rm -f "$PINNED_TMP"' EXIT
 trap 'exit 130' INT TERM
-use_pinned_manifest "${ARGOCD_MANIFEST:-$DEFAULT_MANIFEST}" "$DEFAULT_MANIFEST" \
-  "quay.io/argoproj/argocd:$ARGOCD_VERSION" ARGOCD_MANIFEST
+use_pinned_manifest "${ARGOCD_MANIFEST:-$DEFAULT_MANIFEST}" "$ARGOCD_MANIFEST_SHA256" ARGOCD_MANIFEST
 MANIFEST=$PINNED_MANIFEST
 
 echo "Creating namespace '$NAMESPACE' (if missing)..."

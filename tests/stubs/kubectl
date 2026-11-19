@@ -17,9 +17,16 @@ case "$args" in
   "config get-contexts -o name")
     printf '%s\n' "$STUB_CONTEXTS"
     ;;
-  "get deploy -n cert-manager cert-manager")
-    # STUB_CERT_MANAGER_MISSING=1 makes kargo-install.sh install it.
-    [ "${STUB_CERT_MANAGER_MISSING:-0}" = 1 ] && exit 1
+  "get deploy -n cert-manager cert-manager -o name")
+    # STUB_CERT_MANAGER_MISSING=1 makes kargo-install.sh install it;
+    # STUB_CERT_MANAGER_ERROR=1 is any other failure (API unreachable, ...).
+    if [ "${STUB_CERT_MANAGER_ERROR:-0}" = 1 ]; then
+      echo "The connection to the server 127.0.0.1:6443 was refused" >&2; exit 1
+    fi
+    if [ "${STUB_CERT_MANAGER_MISSING:-0}" = 1 ]; then
+      echo 'Error from server (NotFound): deployments.apps "cert-manager" not found' >&2; exit 1
+    fi
+    echo "deployment.apps/cert-manager"
     ;;
   "get nodes")
     exit "${STUB_NODES_RC:-0}"

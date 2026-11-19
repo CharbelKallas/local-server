@@ -198,10 +198,15 @@ make kargo-password
 
 Offline / mirrored installs: point the script at other copies of the same
 pinned artifacts — `KARGO_CHART=/path/kargo-1.12.1.tgz` (from `helm pull`)
-and `CERT_MANAGER_MANIFEST=/path/cert-manager.yaml` (a file or URL). Both
-are checked against the pinned versions; a different version is refused.
+or another chart reference such as `mirror/kargo` (pulled at the pinned
+version), and `CERT_MANAGER_MANIFEST=/path/cert-manager.yaml` (a file or
+an `https://` URL). The chart package and the cert-manager manifest —
+including the default downloads — must match the pinned sha256
+(`CHART_SHA256`, `CERT_MANAGER_SHA256`), otherwise they are refused.
 
-Pinned versions (change them in `scripts/kargo-install.sh`):
+Pinned versions (change them in `scripts/kargo-install.sh`, together with
+`CHART_SHA256` / `CERT_MANAGER_SHA256`, the sha256 of the new chart
+package / manifest):
 
 | Component | Version |
 |-----------|---------|

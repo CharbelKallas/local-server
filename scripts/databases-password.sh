@@ -7,6 +7,7 @@ CRED_FILE="$SECRETS_DIR/databases.env"
 
 [ -f "$CRED_FILE" ] || die "No database credentials found. Run: make databases-install"
 
+clear_db_credentials
 # shellcheck disable=SC1090
 . "$CRED_FILE"
 

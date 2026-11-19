@@ -14,8 +14,11 @@ kubectl --context k3s-lab apply --server-side -n argocd \
 
 > The `stable` branch is deliberately not used: it moves with every
 > release, so re-running the install could silently upgrade Argo CD
-> (including across a major version). To upgrade, change `ARGOCD_VERSION`,
-> read the upstream upgrade notes, and re-run `make argocd-install`.
+> (including across a major version). The script downloads the manifest
+> and refuses it unless its sha256 matches `ARGOCD_MANIFEST_SHA256`, so a
+> re-tagged or tampered upstream file is never applied. To upgrade, change
+> `ARGOCD_VERSION` and `ARGOCD_MANIFEST_SHA256` (`curl -fsSL <url> | shasum
+> -a 256`), read the upstream upgrade notes, and re-run `make argocd-install`.
 
 > Server-side apply is required because the `applicationsets` CRD is
 > larger than the 256 KiB annotation limit of client-side `kubectl apply`.
@@ -165,11 +168,13 @@ kubectl -n argocd patch application hello-devops-dev --type=merge \
 # Install (idempotent — safe to re-run, also re-applies the NodePort patch)
 make argocd-install
 
-# Upgrade: bump ARGOCD_VERSION in scripts/argocd-install.sh, then
+# Upgrade: bump ARGOCD_VERSION and ARGOCD_MANIFEST_SHA256 (the sha256 of
+# that release's install.yaml) in scripts/argocd-install.sh, then
 make argocd-install
 
 # Offline / mirror: install from another copy of the same pinned manifest
-# (a file or URL). It must be the pinned release — otherwise it is refused.
+# (a file or an https:// URL). Every source — the default download too —
+# must match ARGOCD_MANIFEST_SHA256, otherwise it is refused.
 ARGOCD_MANIFEST=/path/to/install.yaml make argocd-install
 ```
 

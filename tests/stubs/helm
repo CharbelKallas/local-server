@@ -2,9 +2,17 @@
 # Test stub for helm. Logs the call and, for --values files, their path
 # and contents (on CONTENT lines, kept apart from argv).
 echo "helm $*" >> "$STUB_LOG"
-if [ "${1:-}" = show ] && [ "${2:-}" = chart ]; then
-  # STUB_CHART_VERSION: version reported by a local chart.
-  printf 'apiVersion: v2\nname: kargo\nversion: %s\n' "${STUB_CHART_VERSION:-1.12.1}"
+# `pull`: "downloads" $STUB_CHART_FILE into the -d directory (no network).
+case " $* " in *" pull "*) is_pull=true ;; *) is_pull=false ;; esac
+if $is_pull; then
+  dir=""
+  prev=""
+  for a in "$@"; do
+    [ "$prev" = "-d" ] && dir=$a
+    prev=$a
+  done
+  [ -n "${STUB_CHART_FILE:-}" ] && [ -n "$dir" ] || exit 1
+  cp "$STUB_CHART_FILE" "$dir/kargo-1.12.1.tgz"
   exit 0
 fi
 prev=""
