@@ -9,8 +9,7 @@ CRED_FILE="$SECRETS_DIR/databases.env"
 
 check_db_credentials_file "$CRED_FILE"
 clear_db_credentials
-# shellcheck disable=SC1090
-. "$CRED_FILE"
+load_db_credentials "$CRED_FILE"
 
 echo "PostgreSQL: user postgres, database lab, password ${POSTGRES_PASSWORD:-?}"
 echo "MongoDB:    user ${MONGODB_USERNAME:-?}, password ${MONGODB_PASSWORD:-?} (authSource admin)"

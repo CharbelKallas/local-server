@@ -195,9 +195,11 @@ application pods so they pick up the new Secret.
 
 Values in `secrets/databases.env` may use only `A-Z a-z 0-9 . _ ~ -`,
 optionally inside matching quotes (they end up in a shell-sourced file,
-`redis.conf` and a `mongodb://` URI). `make databases-install` refuses
-other characters, and Windows (CRLF) line endings, and names the
-offending line.
+`redis.conf` and a `mongodb://` URI). `export`, indentation, blank lines
+and comments (`# ...`, also after a value) are fine; exported values are
+still kept out of the environment of the commands the scripts run.
+`make databases-install` refuses other characters, and Windows (CRLF)
+line endings, and names the offending line.
 
 ### Upgrading from the No-Auth Setup
 

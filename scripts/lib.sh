@@ -125,15 +125,35 @@ use_pinned_download() {
 # only values from secrets/databases.env (or freshly generated ones) count:
 # an exported REDIS_PASSWORD from another project must never stand in for a
 # key missing from the file.
+DB_CREDENTIAL_KEYS="POSTGRES_PASSWORD MONGODB_USERNAME MONGODB_PASSWORD REDIS_PASSWORD
+  APP_POSTGRES_PASSWORD APP_MONGODB_PASSWORD APP_REDIS_PASSWORD"
 clear_db_credentials() {
-  unset POSTGRES_PASSWORD MONGODB_USERNAME MONGODB_PASSWORD REDIS_PASSWORD \
-    APP_POSTGRES_PASSWORD APP_MONGODB_PASSWORD APP_REDIS_PASSWORD
+  # shellcheck disable=SC2086  # one key per word
+  unset $DB_CREDENTIAL_KEYS
+}
+
+# load_db_credentials <file>: source the credentials file, keeping the
+# values as plain shell variables. An `export KEY=...` line would otherwise
+# put the password into the environment of every command run afterwards
+# (kubectl, openssl, ...); unset + re-assign drops the export attribute.
+load_db_credentials() {
+  # shellcheck disable=SC1090
+  . "$1"
+  for key in $DB_CREDENTIAL_KEYS; do
+    # Values are limited to [A-Za-z0-9._~-] (check_db_credentials_file),
+    # and $key comes from the fixed list above, so this eval is safe.
+    if eval "[ -n \"\${$key+set}\" ]"; then
+      eval "value=\$$key; unset $key; $key=\$value"
+    fi
+  done
+  unset value
 }
 
 # Database credentials end up in a shell-sourced file, space-separated
 # redis.conf lines and a mongodb:// URI, so they are limited to characters
 # that are literal in all three (RFC 3986 "unreserved"), optionally inside
-# matching quotes. Anything else sh would accept around them is allowed:
+# matching quotes. Anything else sh would accept around them is allowed
+# (load_db_credentials keeps `export`ed values out of the environment):
 # indentation, `export`, trailing blanks and a ` # comment`. Generated
 # values are alphanumeric; this catches hand-edited ones. Prints line
 # numbers, never values.
@@ -144,7 +164,7 @@ check_db_credentials_file() {
   set_='[A-Za-z0-9._~-]*'
   assign="(export[[:space:]]+)?[A-Z_][A-Z0-9_]*=($set_|\"$set_\"|'$set_')([[:space:]]+#.*)?"
   bad=$(grep -nvE "^[[:space:]]*(#.*|$assign)?[[:space:]]*\$" "$1" | cut -d: -f1 | tr '\n' ' ')
-  [ -z "$bad" ] || die "$1: line(s) ${bad% } must be KEY=value with values made of A-Z a-z 0-9 . _ ~ - only (optionally in quotes)."
+  [ -z "$bad" ] || die "$1: line(s) ${bad% } must be KEY=value with values made of A-Z a-z 0-9 . _ ~ - only (optionally in quotes; \`export\`, indentation and \` # comments\` are fine)."
 }
 
 # Same for the Kargo admin credentials (secrets/kargo-admin.env).

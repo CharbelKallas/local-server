@@ -532,6 +532,8 @@ run databases-install.sh
 assert_rc 0
 assert_log_contains "CONTENT secret postgres-credentials password=pg2"
 assert_log_contains "CONTENT secret redis-credentials password=rd2"
+# The `export` line must not leak the password into kubectl's environment.
+assert_log_not_contains "ENV_LEAK"
 
 setup "databases-install: explains CRLF line endings"
 mkdir -p "$SECRETS_DIR"

@@ -2,6 +2,11 @@
 # Test stub for kubectl. Logs every call to $STUB_LOG and answers from
 # STUB_* environment variables (see tests/scripts_test.sh).
 echo "kubectl $*" >> "$STUB_LOG"
+# Credentials must never reach a child process's environment.
+for k in POSTGRES_PASSWORD MONGODB_PASSWORD REDIS_PASSWORD APP_POSTGRES_PASSWORD \
+  APP_MONGODB_PASSWORD APP_REDIS_PASSWORD KARGO_ADMIN_PASSWORD; do
+  if eval "[ -n \"\${$k+set}\" ]"; then echo "ENV_LEAK $k" >> "$STUB_LOG"; fi
+done
 
 # Drop the global --context flag to simplify matching.
 args=""

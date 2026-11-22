@@ -48,8 +48,7 @@ if [ -f "$CRED_FILE" ]; then
   # A hand-edited file may lack a final newline; without this the first
   # appended key would be glued onto (and corrupt) the last value.
   if [ -s "$tmp_cred" ] && [ -n "$(tail -c 1 "$tmp_cred")" ]; then echo >> "$tmp_cred"; fi
-  # shellcheck disable=SC1090
-  . "$CRED_FILE"
+  load_db_credentials "$CRED_FILE"
 else
   echo "Generating database credentials -> $CRED_FILE"
 fi
@@ -61,8 +60,7 @@ fi
 [ -n "${APP_POSTGRES_PASSWORD:-}" ] || echo "APP_POSTGRES_PASSWORD=$(gen_secret 32)" >> "$tmp_cred"
 [ -n "${APP_MONGODB_PASSWORD:-}" ] || echo "APP_MONGODB_PASSWORD=$(gen_secret 32)" >> "$tmp_cred"
 [ -n "${APP_REDIS_PASSWORD:-}" ] || echo "APP_REDIS_PASSWORD=$(gen_secret 32)" >> "$tmp_cred"
-# shellcheck disable=SC1090
-. "$tmp_cred"
+load_db_credentials "$tmp_cred"
 
 # PostgreSQL and MongoDB only read their initial credentials when the data
 # directory is empty. If volumes already exist (e.g. from the earlier
