@@ -1,0 +1,26 @@
+# Apply with:  kubectl apply -k kubernetes/databases/   (or: make databases-install)
+#
+# Kustomize always orders the Namespace before the namespaced objects, so
+# the old "apply namespace.yaml first" ordering workaround is not needed.
+#
+# The credential Secrets (postgres-credentials, mongodb-credentials,
+# redis-credentials, hello-devops-app-db) are deliberately NOT part of this
+# kustomization: they
+# are generated locally by scripts/databases-install.sh into the gitignored
+# secrets/ directory and created in the cluster from there. Real secrets
+# never go into Git.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - postgres/pvc.yaml
+  - postgres/service.yaml
+  - postgres/deployment.yaml
+  - mongodb/pvc.yaml
+  - mongodb/service.yaml
+  - mongodb/deployment.yaml
+  - redis/pvc.yaml
+  - redis/service.yaml
+  - redis/deployment.yaml
+  # Creates/updates the hello-devops app users (needs the Secrets below).
+  - app-users-job.yaml

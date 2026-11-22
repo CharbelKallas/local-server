@@ -1,0 +1,56 @@
+# Argo CD AppProject for the EXTERNAL application repository "hello-devops".
+#
+# Why not the built-in "default" project: "default" allows any source
+# repository, any destination namespace, and any cluster-scoped resource.
+# Combined with automated sync, that would let anyone who can push to the
+# hello-devops repository (or anyone who compromises its CI) deploy
+# ClusterRoles/ClusterRoleBindings, CRDs, webhooks or workloads into
+# kube-system — i.e. take over the whole cluster.
+#
+# This project limits the blast radius to what the application needs:
+#   - source:       only the hello-devops repository
+#   - destinations: only the hello-devops-dev / hello-devops-staging
+#                   namespaces of this cluster
+#   - cluster-scoped resources: none — not even Namespace. Whitelisting
+#                   Namespace (which CreateNamespace=true requires) would let
+#                   the repo commit a manifest for any existing namespace
+#                   (e.g. kube-system), relabel it, and — with prune — delete
+#                   it once the manifest is removed. The two app namespaces
+#                   are created by this repo instead
+#                   (hello-devops-namespaces.yaml).
+#   - namespaced resources that change the namespace's own guardrails
+#     (quotas, limit ranges, network policies) or hand-wire Service
+#     endpoints to pods elsewhere (Endpoints, EndpointSlice) are denied.
+#
+# Apply it (and hello-devops-namespaces.yaml) before the Applications.
+# Status: configuration only — not applied to the cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: hello-devops
+  namespace: argocd
+spec:
+  description: hello-devops application (external repository), dev and staging
+  sourceRepos:
+    - https://github.com/CharbelKallas/hello-devops.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: hello-devops-dev
+    - server: https://kubernetes.default.svc
+      namespace: hello-devops-staging
+  # Empty list = no cluster-scoped resources may be deployed from the repo.
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    # Hand-written endpoints let a selector-less Service point at pods in
+    # OTHER namespaces (e.g. the databases) and publish them on a NodePort,
+    # which Lima forwards to the Mac. Services must select their own pods.
+    - group: ""
+      kind: Endpoints
+    - group: discovery.k8s.io
+      kind: EndpointSlice

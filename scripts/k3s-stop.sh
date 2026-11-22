@@ -1,19 +1,21 @@
 #!/bin/sh
-# Stop the K3s service inside the Linux VM (named "k3s").
+# Stop the K3s service inside the Linux VM.
 set -eu
+. "$(dirname -- "$0")/lib.sh"
 
-NAME="k3s"
+require_cmd limactl
 
-if ! limactl list | awk 'NR>1 {print $1}' | grep -qx "$NAME"; then
-  echo "VM '$NAME' does not exist. Nothing to stop."
+status=$(vm_status)
+if [ -z "$status" ]; then
+  echo "VM '$VM_NAME' does not exist. Nothing to stop."
   exit 0
 fi
 
-if [ "$(limactl list | awk -v n="$NAME" '$1 == n {print $2}')" != "Running" ]; then
-  echo "VM '$NAME' is not running. Nothing to stop."
+if [ "$status" != "Running" ]; then
+  echo "VM '$VM_NAME' is not running. Nothing to stop."
   exit 0
 fi
 
 echo "Stopping K3s service..."
-limactl shell "$NAME" -- sudo systemctl stop k3s
+limactl shell "$VM_NAME" -- sudo systemctl stop k3s
 echo "K3s stopped."

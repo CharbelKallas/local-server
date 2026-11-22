@@ -23,10 +23,14 @@ kind: Application
 metadata:
   name: hello-devops-dev
   namespace: argocd   # Argo CD only discovers Applications in its own namespace
+  # Deleting the Application also deletes the workloads it deployed
+  # (cascading delete); without it they would keep running untracked.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
-  # Built-in "default" AppProject (unrestricted in this lab). A dedicated
-  # AppProject can be introduced later if source/destination scoping is wanted.
-  project: default
+  # Dedicated AppProject (kubernetes/argocd/projects/hello-devops.yaml):
+  # restricts this app to its own repo and namespaces. Apply it first.
+  project: hello-devops
   source:
     repoURL: https://github.com/CharbelKallas/hello-devops.git
     targetRevision: master
@@ -34,9 +38,11 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: hello-devops-dev
+  # The destination namespace is created by this repository
+  # (kubernetes/argocd/projects/hello-devops-namespaces.yaml), not via
+  # CreateNamespace=true, which would need the Namespace kind whitelisted
+  # in the AppProject.
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
-    syncOptions:
-      - CreateNamespace=true

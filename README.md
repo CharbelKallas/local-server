@@ -7,16 +7,14 @@ A local DevOps/cloud-native learning lab running on an Apple Silicon Mac (M2 Max
 | Component | Where it runs | Purpose |
 |-----------|---------------|---------|
 | **K3s** | Linux VM | Lightweight Kubernetes cluster |
-| **Ollama** | Native macOS | Local LLM inference |
-| **Docker** | Native macOS | Container runtime (used only where appropriate) |
 | **Argo CD** | K3s | GitOps continuous delivery (deploys external application repos) |
 | **Kargo** | K3s | GitOps promotion orchestration (dev → staging) |
-| **PostgreSQL** | K3s | Relational database (SQL) — manifests prepared, not deployed |
-| **MongoDB** | K3s | Document database (JSON) — manifests prepared, not deployed |
-| **Redis** | K3s | Cache / key-value store — manifests prepared, not deployed |
-| **Prometheus** | K3s | Metrics collection |
-| **Grafana** | K3s | Observability dashboards |
-| **Loki** | K3s | Log aggregation |
+| **PostgreSQL** | K3s | Relational database (SQL) — `make databases-install`, password auth |
+| **MongoDB** | K3s | Document database (JSON) — `make databases-install`, password auth |
+| **Redis** | K3s | Cache / key-value store — `make databases-install`, password auth |
+| **Docker** | Native macOS | Container runtime (used for `make test-e2e`) |
+| *Ollama* | Native macOS | Local LLM inference — *planned, not in this repo yet* |
+| *Prometheus / Grafana / Loki* | K3s | Metrics, dashboards, logs — *planned, not in this repo yet* |
 
 ## Repository Structure
 
@@ -27,10 +25,12 @@ local-server/
 ├── .gitignore
 ├── vm/               # Linux VM configuration (Lima)
 ├── kubernetes/       # Kubernetes manifests
-│   ├── argocd/       #   Argo CD Application definitions (external apps)
+│   ├── argocd/       #   Argo CD AppProject + Application definitions (external apps)
 │   ├── databases/    #   PostgreSQL / MongoDB / Redis
 │   └── kargo/        #   Kargo Project / Warehouse / Stage (promotion)
-├── scripts/          # Automation and utility scripts
+├── scripts/          # Automation scripts (shared helpers in scripts/lib.sh)
+├── tests/            # lint, script unit tests, kind end-to-end test
+├── .github/workflows # CI: runs all of the above on pushes to master and on PRs
 └── docs/             # Documentation
 ```
 
@@ -141,11 +141,11 @@ See [docs/k3s.md](docs/k3s.md) for full documentation.
 ### Argo CD
 
 Argo CD is installed in the K3s cluster (namespace `argocd`) from the
-official stable manifests. The UI is exposed on NodePort 30080, forwarded
-by Lima to `https://localhost:30080` on the Mac (no ingress controller).
+official manifests, pinned to a release (`v3.6.1`). The UI is exposed on
+NodePort 30080, forwarded by Lima to `https://localhost:30080` on the Mac (no ingress controller).
 
-Argo CD `Application` definitions for the future **external** application
-repository are prepared (placeholders, **not applied**) under
+Argo CD `Application` definitions (and a restricted `AppProject`) for the
+future **external** application repository are prepared (**not applied**) under
 [`kubernetes/argocd/applications/`](kubernetes/argocd/applications/) —
 see [docs/gitops.md](docs/gitops.md).
 
@@ -192,26 +192,60 @@ full documentation.
 
 ### Databases
 
-Kubernetes manifests for **PostgreSQL**, **MongoDB** and **Redis** are
-prepared under [`kubernetes/databases/`](kubernetes/databases/) — one
-shared namespace (`databases`), and per database a Deployment (1 replica),
-a ClusterIP Service, and a 1 Gi PersistentVolumeClaim on the K3s
-`local-path` storage class. They are **configuration only: nothing has
-been applied, installed, or started yet.**
+**PostgreSQL**, **MongoDB** and **Redis** live under
+[`kubernetes/databases/`](kubernetes/databases/) — one shared namespace
+(`databases`), and per database a Deployment (1 replica, non-root,
+probes), a ClusterIP Service, and a 1 Gi PersistentVolumeClaim on the K3s
+`local-path` storage class. All three require a password; the passwords
+are generated locally into the gitignored `secrets/` directory and never
+committed.
 
 ```sh
-# When deployment is wanted (cluster must be running):
-kubectl apply -f kubernetes/databases/namespace.yaml
-kubectl apply -R -f kubernetes/databases/
-
-# Verify
-kubectl get deploy,svc,pvc -n databases
+make databases-install     # generate credentials (once), create Secrets, deploy, wait
+make databases-status
+make databases-password
 ```
 
 Ports: PostgreSQL `postgres:5432`, MongoDB `mongodb:27017`, Redis
 `redis:6379` (all ClusterIP, in-cluster only). See
-[docs/databases.md](docs/databases.md) for usage, deployment details, and
-how persistent storage works.
+[docs/databases.md](docs/databases.md) for usage, credentials, rotation,
+and how persistent storage works.
+
+## Kube Context Safety
+
+Every script talks to the cluster through the kubeconfig context
+**`k3s-lab`** explicitly (`kubectl --context`, `helm --kube-context`), never
+through whatever context happens to be current, so `make argocd-install`
+cannot install into a different cluster by accident. Override with
+`KUBE_CONTEXT=<name> make ...` if your context is named differently. See
+[docs/k3s.md](docs/k3s.md).
+
+## Tests
+
+```sh
+make lint       # shellcheck + kubeconform (strict) on all scripts/manifests
+make test       # lint + unit tests for every script (stubbed kubectl/helm/limactl)
+make test-e2e   # throwaway kind cluster: real installs + behaviour checks
+```
+
+`make lint` and `make test` need no cluster (they use local `shellcheck` /
+`kubeconform` if installed, otherwise pinned Docker images).
+`make test-e2e` needs Docker, `kind`, `kubectl`, `helm`, `openssl` and
+`htpasswd`. It uses its **own** kubeconfig file, so it never touches
+`~/.kube/config` or the Lima VM, and it deletes the cluster afterwards. It
+verifies that each database rejects unauthenticated clients, accepts the
+generated credentials, persists data across restarts and runs as non-root;
+that Argo CD and Kargo install and are reachable with their passwords; and
+that the GitOps manifests are accepted by the real CRDs (including that
+the AppProject rejects deployments into `kube-system` and refuses
+`Namespace` objects, while the real `hello-devops-dev` app still syncs);
+and that privileged pods are rejected by Pod Security in the app and
+database namespaces. Skip suites with
+`E2E_SKIP="argocd kargo"`.
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs all three
+on pushes to `master` and on pull requests (pushes to other branches without
+a PR are not tested).
 
 ## Prerequisites
 
@@ -222,7 +256,7 @@ how persistent storage works.
 - [ ] Ollama
 - [x] Argo CD (GitOps CD — see `docs/argocd.md`)
 - [x] Kargo (GitOps promotion — see `docs/kargo.md`)
-- [ ] Databases: PostgreSQL / MongoDB / Redis (manifests ready, not deployed — see `docs/databases.md`)
+- [x] Databases: PostgreSQL / MongoDB / Redis (password auth, `make databases-install` — see `docs/databases.md`)
 - [ ] Prometheus / Grafana / Loki
 - [ ] External application repository `hello-devops` (not created yet — GitOps config prepared, see `docs/gitops.md`)
 

@@ -1,0 +1,86 @@
+#!/bin/sh
+# Test stub for kubectl. Logs every call to $STUB_LOG and answers from
+# STUB_* environment variables (see tests/scripts_test.sh).
+echo "kubectl $*" >> "$STUB_LOG"
+# Credentials must never reach a child process's environment
+# (scripts_test.sh fails any test whose log has an ENV_LEAK line).
+. "$(dirname -- "$0")/env-leak-check.sh"
+
+# Drop the global --context flag to simplify matching.
+args=""
+skip=false
+for a in "$@"; do
+  if $skip; then skip=false; continue; fi
+  if [ "$a" = "--context" ]; then skip=true; continue; fi
+  args="$args $a"
+done
+args=${args# }
+
+case "$args" in
+  "config get-contexts -o name")
+    printf '%s\n' "$STUB_CONTEXTS"
+    ;;
+  "get deploy -n cert-manager cert-manager -o name")
+    # STUB_CERT_MANAGER_MISSING=1 makes kargo-install.sh install it;
+    # STUB_CERT_MANAGER_ERROR=1 is any other failure (API unreachable, ...).
+    if [ "${STUB_CERT_MANAGER_ERROR:-0}" = 1 ]; then
+      echo "The connection to the server 127.0.0.1:6443 was refused" >&2; exit 1
+    fi
+    if [ "${STUB_CERT_MANAGER_MISSING:-0}" = 1 ]; then
+      echo 'Error from server (NotFound): deployments.apps "cert-manager" not found' >&2; exit 1
+    fi
+    echo "deployment.apps/cert-manager"
+    ;;
+  "get nodes")
+    exit "${STUB_NODES_RC:-0}"
+    ;;
+  *"get svc argocd-server"*nodePort*|*"get svc kargo-api"*nodePort*)
+    if [ -n "${STUB_NODEPORT:-}" ]; then printf '%s' "$STUB_NODEPORT"
+    else case "$args" in *kargo-api*) printf '30090' ;; esac
+    fi
+    ;;
+  *"get secret argocd-initial-admin-secret"*)
+    [ -n "${STUB_SECRET_B64:-}" ] || exit 1
+    printf '%s' "$STUB_SECRET_B64"
+    ;;
+  "get pvc -n databases -o name")
+    [ "${STUB_PVC_RC:-0}" = 0 ] || { echo "error: the server is unavailable" >&2; exit "$STUB_PVC_RC"; }
+    [ -n "${STUB_PVCS:-}" ] && printf '%s\n' "$STUB_PVCS"
+    ;;
+  "create secret generic "*)
+    # Record the *contents* of every --from-file source on CONTENT lines,
+    # so tests can check values without them being on any command line.
+    set -- $args
+    name=$4
+    for a in "$@"; do
+      case "$a" in
+        --from-file=*=*)
+          spec=${a#--from-file=}
+          key=${spec%%=*}
+          path=${spec#*=}
+          # Newlines become "|" so multi-line files stay on one CONTENT line.
+          echo "CONTENT secret $name $key=$(tr '\n' '|' < "$path")" >> "$STUB_LOG"
+          ;;
+      esac
+    done
+    echo "kind: Secret"
+    ;;
+  *"apply"*" -f -"*|*"apply -f -")
+    cat > /dev/null
+    # STUB_APPLY_ACTION (created/configured/unchanged) emulates kubectl's
+    # "secret/<name> <action>" output.
+    [ -z "${STUB_APPLY_ACTION:-}" ] || echo "secret/stub $STUB_APPLY_ACTION"
+    ;;
+  "get job hello-devops-db-users -n databases"*)
+    # STUB_JOB_STATE: Complete (default), Failed, or absent (NotFound).
+    [ "${STUB_JOB_STATE:-Complete}" = absent ] && { echo "Error from server (NotFound)" >&2; exit 1; }
+    case "$args" in
+      *metadata.name*) echo "hello-devops-db-users ${STUB_JOB_STATE:-Complete}" ;;
+      *) echo "${STUB_JOB_STATE:-Complete}" ;;
+    esac
+    ;;
+  "logs job/hello-devops-db-users"*)
+    echo "MongoServerError: Authentication failed."
+    ;;
+esac
+exit 0

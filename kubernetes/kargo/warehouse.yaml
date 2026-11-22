@@ -18,6 +18,8 @@ metadata:
   name: hello-devops
   namespace: hello-devops   # the namespace created by Project hello-devops
 spec:
+  # How often the registry is polled for new images (Kargo's default).
+  interval: 5m0s
   subscriptions:
     # The container image produced by the hello-devops repository's CI.
     # Contract: GitHub Actions pushes <LOCAL_REGISTRY_URL>/hello-devops:latest

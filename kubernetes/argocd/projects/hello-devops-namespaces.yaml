@@ -1,0 +1,53 @@
+# Destination namespaces for the hello-devops Applications.
+#
+# Owned by THIS (infrastructure) repository on purpose. The hello-devops
+# AppProject allows no cluster-scoped resources at all, and Argo CD's
+# CreateNamespace=true sync option counts as deploying a Namespace, so it
+# would require whitelisting the Namespace kind — which would let the
+# application repository adopt, relabel and (with prune) delete ANY
+# namespace, including kube-system. Creating the two namespaces here keeps
+# the application repository strictly namespaced.
+#
+# Apply together with the AppProject, before the Applications.
+# Status: configuration only — not applied to the cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hello-devops-dev
+  labels:
+    app.kubernetes.io/part-of: hello-devops
+    # Pod Security Admission: reject privileged / hostPath / hostNetwork /
+    # root pods. The AppProject limits WHAT KINDS the app repo may deploy;
+    # this limits what its Pods may do — without it, a privileged pod with a
+    # hostPath mount would give root on the node (and the K3s admin
+    # kubeconfig). hello-devops's Deployment already meets "restricted".
+    pod-security.kubernetes.io/enforce: restricted
+    # Pinned to the lab's Kubernetes minor so a K3s upgrade can't tighten
+    # the enforced policy unannounced; warn/audit track "latest" to show
+    # upcoming changes. Bump together with K3S_VERSION.
+    pod-security.kubernetes.io/enforce-version: v1.36
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hello-devops-staging
+  labels:
+    app.kubernetes.io/part-of: hello-devops
+    # Pod Security Admission: reject privileged / hostPath / hostNetwork /
+    # root pods. The AppProject limits WHAT KINDS the app repo may deploy;
+    # this limits what its Pods may do — without it, a privileged pod with a
+    # hostPath mount would give root on the node (and the K3s admin
+    # kubeconfig). hello-devops's Deployment already meets "restricted".
+    pod-security.kubernetes.io/enforce: restricted
+    # Pinned to the lab's Kubernetes minor so a K3s upgrade can't tighten
+    # the enforced policy unannounced; warn/audit track "latest" to show
+    # upcoming changes. Bump together with K3S_VERSION.
+    pod-security.kubernetes.io/enforce-version: v1.36
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

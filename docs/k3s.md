@@ -5,7 +5,11 @@
 K3s runs inside the Linux VM managed by Lima (instance name: `k3s`).
 
 - **VM OS:** Ubuntu 24.04 LTS (arm64)
-- **K3s version:** v1.36.5+k3s1
+- **K3s version:** v1.36.5+k3s1 (pinned in `scripts/k3s-start.sh` as
+  `K3S_VERSION`; a fresh install or VM rebuild gets exactly this version).
+  The installer is that release's `install.sh` (not the moving
+  `get.k3s.io` one) and must match `K3S_INSTALLER_SHA256`; update both
+  when bumping the version
 - **Node name:** `lima-k3s`
 - **Service:** `systemd` unit `k3s` inside the VM
 
@@ -27,9 +31,31 @@ forwarding:
 Mac kubectl  ──→  127.0.0.1:6443  ──→  Lima port-forward  ──→  VM K3s API :6443
 ```
 
-The kubeconfig was copied from `/etc/rancher/k3s/k3s.yaml` inside the VM
-and the server address was changed from `https://127.0.0.1:6443` (which
-is already correct for Lima's forwarding).
+The kubeconfig was copied from `/etc/rancher/k3s/k3s.yaml` inside the VM.
+Its server address, `https://127.0.0.1:6443`, already works from the Mac
+thanks to Lima's port forwarding, so only the context name was changed to
+`k3s-lab`.
+
+Every script in `scripts/` runs `kubectl`/`helm` with
+`--context k3s-lab` explicitly, so it never acts on another cluster just
+because kubectl's *current* context points elsewhere (Docker Desktop,
+a work cluster, ...). To use a different context name:
+
+```sh
+KUBE_CONTEXT=my-context make argocd-status
+```
+
+To (re)create the context after rebuilding the VM (the new file is listed
+first in `KUBECONFIG`, so its entries win over stale ones of the same name):
+
+```sh
+new=$(mktemp)
+limactl shell k3s -- sudo cat /etc/rancher/k3s/k3s.yaml | sed 's/: default$/: k3s-lab/' > "$new"
+KUBECONFIG="$new:$HOME/.kube/config" kubectl config view --flatten > "$new.merged" \
+  && mv "$new.merged" "$HOME/.kube/config" && chmod 600 "$HOME/.kube/config"
+rm -f "$new"
+kubectl config use-context k3s-lab
+```
 
 ## How to Check the Cluster
 
@@ -120,9 +146,14 @@ If the cluster is in a bad state and you want to start fresh:
 # Uninstall K3s (removes all workloads and data)
 limactl shell k3s -- sudo /usr/local/bin/k3s-uninstall.sh
 
-# Reinstall K3s
-limactl shell k3s -- curl -sfL https://get.k3s.io | sh -
+# Reinstall K3s (pinned version, installed inside the VM)
+make k3s-start
 ```
+
+> Do **not** use `limactl shell k3s -- curl -sfL https://get.k3s.io | sh -`:
+> the `| sh -` part runs on the **Mac**, not in the VM, so it would execute
+> the K3s installer on macOS. `make k3s-start` downloads the pinned
+> installer on the Mac, verifies its sha256 there, and runs it inside the VM.
 
 > **Warning:** This deletes all pods, services, and data stored in the
 > cluster. Use only when you want a completely clean slate.

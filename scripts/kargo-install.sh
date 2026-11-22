@@ -10,8 +10,10 @@
 #     issues self-signed TLS certs for the API server and webhook servers.
 #   * Admin credentials — bcrypt password hash + token signing key are
 #     mandatory chart values. They are generated once and kept in
-#     secrets/kargo-admin.env (gitignored); re-runs reuse them so the
-#     admin password and issued tokens stay stable.
+#     secrets/kargo-admin.env (gitignored, mode 600); re-runs reuse them so
+#     the admin password and issued tokens stay stable. They are handed to
+#     Helm through a private temporary values file, never on the command
+#     line (where any local user could read them with `ps`).
 #
 # The Kargo API server (which also serves the web UI) is exposed on
 # NodePort 30090. Lima forwards guest ports 30000-32767 to the same ports
@@ -23,97 +25,176 @@
 #
 # Idempotent: safe to re-run.
 set -eu
+. "$(dirname -- "$0")/lib.sh"
 
 NAMESPACE="kargo"
 RELEASE="kargo"
-CHART="oci://ghcr.io/akuity/kargo-charts/kargo"
 CHART_VERSION="1.12.1"          # keep in sync with docs/kargo.md
-CERT_MANAGER_VERSION="v1.21.2"  # keep in sync with docs/kargo.md
+# sha256 of that chart's package (kargo-1.12.1.tgz) — update with the version.
+CHART_SHA256="d152209bc01fe7577285ecc1803e4dac4832ec6e7a7724a89351dbf799d43d6a"
+CERT_MANAGER_VERSION="v1.21.3"  # keep in sync with docs/kargo.md
+# sha256 of that release's cert-manager.yaml — update together with the version.
+CERT_MANAGER_SHA256="c04a51295adda2b1a775146751f973e787190778c7f35180861d9678876e5c74"
 API_NODE_PORT="30090"
+# Optional other copies of the same pinned artifacts (offline installs, a
+# mirror, or the e2e test reusing its one download):
+# KARGO_CHART = a packaged chart (.tgz from `helm pull`) or another chart
+#   reference (OCI or `repo/chart`, pulled at --version),
+# CERT_MANAGER_MANIFEST = a cert-manager.yaml file or https URL.
+# Both are sha256-checked, like the defaults.
+CHART="${KARGO_CHART:-oci://ghcr.io/akuity/kargo-charts/kargo}"
+DEFAULT_CERT_MANAGER_MANIFEST="https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml"
+CRED_FILE="$SECRETS_DIR/kargo-admin.env"
 
-REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-CRED_FILE="$REPO_ROOT/secrets/kargo-admin.env"
+clear_kargo_credentials
+require_cluster
+require_cmd helm "Install it first (e.g. brew install helm)."
+require_cmd openssl
+require_cmd htpasswd
 
-if ! kubectl get nodes >/dev/null 2>&1; then
-  echo "Cannot reach the K3s cluster. Run: make k3s-start" >&2
-  exit 1
+# Temp files (credentials, values, a downloaded manifest) hold
+# real secrets or unverified downloads: always remove them, even on Ctrl-C. (EXIT
+# does the cleanup; INT/TERM must exit explicitly, or a bare handler would
+# run the cleanup and then let the script carry on.)
+tmp_cred=""
+values_file=""
+chart_dir=""
+cache_tmp=""
+cleanup() {
+  rm -f "$tmp_cred" "$values_file" "$PINNED_TMP" "$cache_tmp"
+  [ -z "$chart_dir" ] || rm -rf "$chart_dir"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# --- Kargo chart (pinned by sha256) -----------------------------------------
+# A tag such as 1.12.1 can be re-pushed, so the chart package is fetched
+# first and must match CHART_SHA256 — the same check as for the manifests.
+# A chart reference (the default OCI one, or a mirror) is pulled at the
+# pinned version once and kept in $CACHE_DIR, so re-runs need no registry;
+# the cached copy is re-verified every time. A .tgz on disk is checked as is.
+CACHED_CHART="$CACHE_DIR/kargo-$CHART_VERSION.tgz"
+if [ -d "$CHART" ]; then
+  die "KARGO_CHART '$CHART' is a directory; give a packaged chart (.tgz from 'helm pull' or 'helm package')."
+elif [ -e "$CHART" ]; then
+  chart_file=$CHART
+elif [ -f "$CACHED_CHART" ] && [ "$(sha256_of "$CACHED_CHART")" = "$CHART_SHA256" ]; then
+  echo "Using the cached Kargo chart ($CACHED_CHART)."
+  chart_file=$CACHED_CHART
+else
+  chart_dir=$(mktemp -d)
+  hc pull "$CHART" --version "$CHART_VERSION" -d "$chart_dir" >/dev/null \
+    || die "KARGO_CHART: could not pull '$CHART' version $CHART_VERSION."
+  chart_file=$(find "$chart_dir" -name '*.tgz' | head -n 1)
+  [ -n "$chart_file" ] || die "KARGO_CHART: pulling '$CHART' produced no chart package."
 fi
-
-if ! command -v helm >/dev/null 2>&1; then
-  echo "helm not found. Install it first (e.g. brew install helm)." >&2
-  exit 1
+use_pinned_download "$chart_file" "$CHART_SHA256" KARGO_CHART
+chart_file=$PINNED_FILE
+if [ -n "$chart_dir" ]; then
+  # Only a verified package is cached, atomically (an interrupted copy is
+  # never mistaken for a cached chart) and through a unique temp file, so
+  # concurrent installs cannot trip over each other.
+  mkdir -p "$CACHE_DIR"
+  cache_tmp=$(mktemp "$CACHED_CHART.XXXXXX")
+  cp "$chart_file" "$cache_tmp"
+  mv "$cache_tmp" "$CACHED_CHART"
+  cache_tmp=""
 fi
 
 # --- cert-manager (dependency of Kargo's default configuration) ------------
-if kubectl get deploy -n cert-manager cert-manager >/dev/null 2>&1; then
+# Only a definite NotFound means "not installed". Any other error (API
+# unreachable, RBAC, timeout) must stop here: treating it as "missing" would
+# force-apply this cert-manager over one that something else manages.
+if cm_probe=$(kc get deploy -n cert-manager cert-manager -o name 2>&1); then
   echo "cert-manager already installed — leaving it untouched."
 else
+  case "$cm_probe" in
+    *NotFound*) ;;
+    *) die "Could not check for an existing cert-manager: $cm_probe" ;;
+  esac
   echo "Installing cert-manager $CERT_MANAGER_VERSION (required by Kargo)..."
+  use_pinned_download "${CERT_MANAGER_MANIFEST:-$DEFAULT_CERT_MANAGER_MANIFEST}" \
+    "$CERT_MANAGER_SHA256" CERT_MANAGER_MANIFEST
   # Server-side apply: cert-manager's CRDs exceed the 256 KiB
   # last-applied-configuration annotation limit of client-side apply.
-  kubectl apply --server-side --force-conflicts \
-    -f "https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml"
+  kc apply --server-side --force-conflicts \
+    -f "$PINNED_FILE"
 fi
 
 echo "Waiting for cert-manager to become ready..."
-kubectl wait --for=condition=Available deploy --all -n cert-manager --timeout=300s
+kc wait --for=condition=Available deploy --all -n cert-manager --timeout=300s
 
 # --- admin account credentials (generated once, reused on re-runs) --------
+umask 077
+# Also tightens a secrets/ directory created by older versions (0755).
+ensure_secrets_dir
 if [ -f "$CRED_FILE" ]; then
   echo "Reusing existing Kargo admin credentials ($CRED_FILE)."
 else
   echo "Generating Kargo admin credentials -> $CRED_FILE"
-  pass=$(openssl rand -base64 48 | tr -d "=+/" | head -c 32)
-  # bcrypt hash as required by api.adminAccount.passwordHash.
-  hashed_pass=$(htpasswd -bnBC 10 "" "$pass" | tr -d ':\n')
-  signing_key=$(openssl rand -base64 48 | tr -d "=+/" | head -c 32)
+  pass=$(gen_secret 32)
+  # bcrypt hash as required by api.adminAccount.passwordHash. -i reads the
+  # password from stdin so it never appears in the process list.
+  hashed_pass=$(printf '%s' "$pass" | htpasswd -inBC 10 "" | tr -d ':\n')
+  signing_key=$(gen_secret 32)
+  # shellcheck disable=SC2016  # literal '$2' prefix of a bcrypt hash
+  case "$hashed_pass" in
+    '$2'*) ;;
+    *) die "htpasswd did not produce a bcrypt hash." ;;
+  esac
 
-  mkdir -p "$(dirname "$CRED_FILE")"
   # The hash contains '$' characters, so quote it literally when storing it;
-  # the file is sourced by kargo-password.sh.
+  # the file is sourced by this script and by kargo-password.sh.
+  tmp_cred=$(mktemp "$CRED_FILE.XXXXXX")
   {
     printf 'KARGO_ADMIN_PASSWORD=%s\n' "$pass"
     printf "KARGO_ADMIN_PASSWORD_HASH='%s'\n" "$hashed_pass"
     printf 'KARGO_TOKEN_SIGNING_KEY=%s\n' "$signing_key"
-  } > "$CRED_FILE"
-  chmod 600 "$CRED_FILE"
+  } > "$tmp_cred"
+  mv "$tmp_cred" "$CRED_FILE"
+  tmp_cred=""
 fi
+chmod 600 "$CRED_FILE"
 
-# shellcheck disable=SC1090
-. "$CRED_FILE"
+load_kargo_credentials "$CRED_FILE"
 
 if [ -z "${KARGO_ADMIN_PASSWORD_HASH:-}" ] || [ -z "${KARGO_TOKEN_SIGNING_KEY:-}" ]; then
-  echo "Invalid credentials file: $CRED_FILE (delete it and re-run)." >&2
-  exit 1
+  die "Invalid credentials file: $CRED_FILE (delete it and re-run)."
 fi
 
 # --- install Kargo ---------------------------------------------------------
+values_file=$(mktemp)
+# Both values are generated by this script: the hash is [$./0-9A-Za-z] and
+# the key is alphanumeric, so single-quoted YAML scalars are safe.
+cat > "$values_file" <<VALUES
+api:
+  adminAccount:
+    passwordHash: '$KARGO_ADMIN_PASSWORD_HASH'
+    tokenSigningKey: '$KARGO_TOKEN_SIGNING_KEY'
+  service:
+    type: NodePort
+    nodePort: $API_NODE_PORT
+VALUES
+
 echo "Installing Kargo $CHART_VERSION (Helm release '$RELEASE', namespace '$NAMESPACE')..."
-helm upgrade --install "$RELEASE" "$CHART" \
+hc upgrade --install "$RELEASE" "$chart_file" \
   --namespace "$NAMESPACE" --create-namespace \
-  --version "$CHART_VERSION" \
-  --set-string "api.adminAccount.passwordHash=$KARGO_ADMIN_PASSWORD_HASH" \
-  --set-string "api.adminAccount.tokenSigningKey=$KARGO_TOKEN_SIGNING_KEY" \
-  --set "api.service.type=NodePort" \
-  --set "api.service.nodePort=$API_NODE_PORT" \
+  --values "$values_file" \
   --wait --timeout 10m
 
 echo "Waiting for Kargo workloads to become available..."
 # Wait on Deployments, not on every Pod in the namespace: the
 # kargo-garbage-collector CronJob leaves `Completed` pods behind, and a
-# finished pod never satisfies Ready, which would stall this wait for the
-# full timeout and then fail.
-kubectl wait --for=condition=Available deploy --all -n "$NAMESPACE" --timeout=300s
+# finished pod never satisfies Ready.
+kc wait --for=condition=Available deploy --all -n "$NAMESPACE" --timeout=300s
 
-# The manifest pin above is the source of truth for the UI address — verify
-# it so a chart change can't silently break the documented URL.
-if [ "$(kubectl get svc kargo-api -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].nodePort}')" != "$API_NODE_PORT" ]; then
-  echo "Failed to expose kargo-api on NodePort $API_NODE_PORT." >&2
-  exit 1
+# Verify the documented UI address so a chart change can't silently break it.
+if [ "$(kc get svc kargo-api -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].nodePort}')" != "$API_NODE_PORT" ]; then
+  die "Failed to expose kargo-api on NodePort $API_NODE_PORT."
 fi
 
 echo
 echo "Kargo is installed."
 echo "UI:     https://localhost:$API_NODE_PORT   (user: admin, password: make kargo-password)"
-echo "Pods:   kubectl get pods -n $NAMESPACE"
+echo "Pods:   kubectl --context $KUBE_CONTEXT get pods -n $NAMESPACE"
 echo "Status: make kargo-status"
