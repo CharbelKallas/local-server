@@ -162,6 +162,23 @@ images_in() { grep -oE 'image: *"?[^" ]+' | sed -E 's/image: *"?//' | sort -u; }
 # Pinned versions, read from the install scripts (single source of truth).
 pinned() { sed -n "s/^$1=\"\${$1:-\(.*\)}\".*/\1/p; s/^$1=\"\([^$]*\)\".*/\1/p" "$REPO_ROOT/scripts/$2" | head -n 1; }
 
+# Verified downloads go to a throwaway cache, so the Kargo chart below is
+# really pulled (and then re-used) by kargo-install.sh itself.
+export CACHE_DIR="$WORK/cache"
+
+# ---------------------------------------------------------------------------
+step "K3s: the pinned installer matches K3S_INSTALLER_SHA256"
+# The installer only runs inside a Lima VM (not in kind), so check here
+# that the constant really is the hash of the pinned release's install.sh.
+k3s_version=$(pinned K3S_VERSION k3s-start.sh)
+curl -fsSL -o "$WORK/k3s-install.sh" \
+  "https://raw.githubusercontent.com/k3s-io/k3s/$k3s_version/install.sh"
+# shellcheck disable=SC2016  # expanded by that shell
+k3s_sha=$(sh -c '. "$1/scripts/lib.sh" && sha256_of "$2"' sh "$REPO_ROOT" "$WORK/k3s-install.sh")
+if [ "$k3s_sha" = "$(pinned K3S_INSTALLER_SHA256 k3s-start.sh)" ]; then
+  pass "K3s $k3s_version install.sh matches its pinned sha256"
+else fail "K3s $k3s_version install.sh has sha256 $k3s_sha, not K3S_INSTALLER_SHA256"; fi
+
 step "Preloading database and client images into the kind node"
 preload postgres:17-alpine mongo:8.0 redis:7.4-alpine busybox:1.36
 
@@ -473,26 +490,29 @@ if skip kargo; then
   step "kargo: skipped"
 else
   step "kargo: preloading cert-manager and Kargo images"
-  # Downloaded once and handed to kargo-install.sh (CERT_MANAGER_MANIFEST,
-  # KARGO_CHART), which then installs from these exact files.
+  # cert-manager is downloaded once and handed to kargo-install.sh
+  # (CERT_MANAGER_MANIFEST). The Kargo chart is pulled here only to list its
+  # images: kargo-install.sh pulls, verifies and caches its own copy.
   curl -fsSL -o "$WORK/cert-manager.yaml" \
     "https://github.com/cert-manager/cert-manager/releases/download/$(pinned CERT_MANAGER_VERSION kargo-install.sh)/cert-manager.yaml"
   export CERT_MANAGER_MANIFEST="$WORK/cert-manager.yaml"
   helm pull oci://ghcr.io/akuity/kargo-charts/kargo \
     --version "$(pinned CHART_VERSION kargo-install.sh)" -d "$WORK" >/dev/null
-  KARGO_CHART=$(ls "$WORK"/kargo-*.tgz)
-  export KARGO_CHART
+  images_chart=$(ls "$WORK"/kargo-*.tgz)
   # shellcheck disable=SC2046  # one image per word
   preload $(images_in < "$CERT_MANAGER_MANIFEST")
   # The chart refuses to render without its mandatory admin values; dummies
   # are fine for listing images.
   # shellcheck disable=SC2046
-  preload $(helm template kargo "$KARGO_CHART" \
+  preload $(helm template kargo "$images_chart" \
     --set api.adminAccount.passwordHash=x --set api.adminAccount.tokenSigningKey=x 2>/dev/null | images_in)
 
   step "kargo: make kargo-install"
   "$REPO_ROOT/scripts/kargo-install.sh"
-  if "$REPO_ROOT/scripts/kargo-install.sh" >/dev/null; then pass "re-run is idempotent"; else fail "re-run is idempotent"; fi
+  if [ -f "$CACHE_DIR/kargo-$(pinned CHART_VERSION kargo-install.sh).tgz" ]; then pass "pulled chart verified and cached"
+  else fail "chart not cached in $CACHE_DIR"; fi
+  if out=$("$REPO_ROOT/scripts/kargo-install.sh"); then pass "re-run is idempotent"; else fail "re-run is idempotent"; fi
+  case "$out" in *"Using the cached Kargo chart"*) pass "re-run uses the cached chart" ;; *) fail "re-run did not use the cached chart" ;; esac
   if "$REPO_ROOT/scripts/kargo-status.sh" | grep -q 'https://localhost:30090'; then pass "kargo-status shows UI address"; else fail "kargo-status shows UI address"; fi
 
   step "kargo: admin password works against the API"

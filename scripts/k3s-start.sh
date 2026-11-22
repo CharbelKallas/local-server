@@ -25,7 +25,7 @@ if ! limactl shell "$VM_NAME" -- sh -c 'command -v k3s >/dev/null 2>&1'; then
   # sha256 against the release checksums.
   trap 'rm -f "$PINNED_TMP"' EXIT
   trap 'exit 130' INT TERM
-  use_pinned_manifest "$K3S_INSTALLER" "$K3S_INSTALLER_SHA256" K3S_INSTALLER
+  use_pinned_download "$K3S_INSTALLER" "$K3S_INSTALLER_SHA256" K3S_INSTALLER
   # Single quotes are deliberate: these expand inside the VM, not here.
   # shellcheck disable=SC2016
   limactl shell "$VM_NAME" -- sh -c '
@@ -34,7 +34,7 @@ if ! limactl shell "$VM_NAME" -- sh -c 'command -v k3s >/dev/null 2>&1'; then
     trap "rm -f \"$tmp\"" EXIT
     cat > "$tmp"
     sudo INSTALL_K3S_VERSION="$1" INSTALL_K3S_FORCE_RESTART=true sh "$tmp"
-  ' sh "$K3S_VERSION" < "$PINNED_MANIFEST"
+  ' sh "$K3S_VERSION" < "$PINNED_FILE"
 fi
 
 echo "Starting K3s service..."

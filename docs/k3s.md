@@ -152,8 +152,8 @@ make k3s-start
 
 > Do **not** use `limactl shell k3s -- curl -sfL https://get.k3s.io | sh -`:
 > the `| sh -` part runs on the **Mac**, not in the VM, so it would execute
-> the K3s installer on macOS. `make k3s-start` downloads and runs the
-> installer inside the VM.
+> the K3s installer on macOS. `make k3s-start` downloads the pinned
+> installer on the Mac, verifies its sha256 there, and runs it inside the VM.
 
 > **Warning:** This deletes all pods, services, and data stored in the
 > cluster. Use only when you want a completely clean slate.

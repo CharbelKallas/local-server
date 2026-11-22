@@ -69,9 +69,16 @@ trap 'exit 130' INT TERM
 # A tag such as 1.12.1 can be re-pushed, so the chart package is fetched
 # first and must match CHART_SHA256 — the same check as for the manifests.
 # A chart reference (the default OCI one, or a mirror) is pulled at the
-# pinned version; a .tgz on disk is checked as it is.
-if [ -e "$CHART" ]; then
+# pinned version once and kept in $CACHE_DIR, so re-runs need no registry;
+# the cached copy is re-verified every time. A .tgz on disk is checked as is.
+CACHED_CHART="$CACHE_DIR/kargo-$CHART_VERSION.tgz"
+if [ -d "$CHART" ]; then
+  die "KARGO_CHART '$CHART' is a directory; give a packaged chart (.tgz from 'helm pull' or 'helm package')."
+elif [ -e "$CHART" ]; then
   chart_file=$CHART
+elif [ -f "$CACHED_CHART" ] && [ "$(sha256_of "$CACHED_CHART")" = "$CHART_SHA256" ]; then
+  echo "Using the cached Kargo chart ($CACHED_CHART)."
+  chart_file=$CACHED_CHART
 else
   chart_dir=$(mktemp -d)
   hc pull "$CHART" --version "$CHART_VERSION" -d "$chart_dir" >/dev/null \
@@ -79,8 +86,15 @@ else
   chart_file=$(find "$chart_dir" -name '*.tgz' | head -n 1)
   [ -n "$chart_file" ] || die "KARGO_CHART: pulling '$CHART' produced no chart package."
 fi
-use_pinned_manifest "$chart_file" "$CHART_SHA256" KARGO_CHART
-chart_file=$PINNED_MANIFEST
+use_pinned_download "$chart_file" "$CHART_SHA256" KARGO_CHART
+chart_file=$PINNED_FILE
+if [ -n "$chart_dir" ]; then
+  # Only a verified package is cached (atomically, so an interrupted copy
+  # is never mistaken for a cached chart).
+  mkdir -p "$CACHE_DIR"
+  cp "$chart_file" "$CACHED_CHART.tmp"
+  mv "$CACHED_CHART.tmp" "$CACHED_CHART"
+fi
 
 # --- cert-manager (dependency of Kargo's default configuration) ------------
 # Only a definite NotFound means "not installed". Any other error (API
@@ -94,12 +108,12 @@ else
     *) die "Could not check for an existing cert-manager: $cm_probe" ;;
   esac
   echo "Installing cert-manager $CERT_MANAGER_VERSION (required by Kargo)..."
-  use_pinned_manifest "${CERT_MANAGER_MANIFEST:-$DEFAULT_CERT_MANAGER_MANIFEST}" \
+  use_pinned_download "${CERT_MANAGER_MANIFEST:-$DEFAULT_CERT_MANAGER_MANIFEST}" \
     "$CERT_MANAGER_SHA256" CERT_MANAGER_MANIFEST
   # Server-side apply: cert-manager's CRDs exceed the 256 KiB
   # last-applied-configuration annotation limit of client-side apply.
   kc apply --server-side --force-conflicts \
-    -f "$PINNED_MANIFEST"
+    -f "$PINNED_FILE"
 fi
 
 echo "Waiting for cert-manager to become ready..."

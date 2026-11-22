@@ -30,8 +30,9 @@ setup() {
   mkdir -p "$WORK/case"
   STUB_LOG="$WORK/case/calls.log"
   SECRETS_DIR="$WORK/case/secrets"
+  CACHE_DIR="$WORK/case/cache"
   : > "$STUB_LOG"
-  export STUB_LOG SECRETS_DIR
+  export STUB_LOG SECRETS_DIR CACHE_DIR
   # Defaults: a healthy, reachable lab cluster in a running VM.
   export STUB_CONTEXTS="k3s-lab"
   export STUB_NODES_RC=0
@@ -260,6 +261,12 @@ assert_log_contains "--proto =https --proto-redir =https -o"
 assert_log_contains "https://mirror.example/install.yaml"
 assert_log_not_contains "-f https://mirror.example/install.yaml"
 
+setup "argocd-install: a directory as ARGOCD_MANIFEST is not reported as tampering"
+run ARGOCD_MANIFEST="$WORK/case" argocd-install.sh
+assert_rc 1
+assert_out_contains "is not a readable file"
+assert_out_not_contains "not the pinned release"
+
 setup "argocd-install: refuses a plain http:// override"
 run ARGOCD_MANIFEST=http://mirror.example/install.yaml argocd-install.sh
 assert_rc 1
@@ -368,6 +375,37 @@ assert_rc 1
 assert_out_contains "expected d152209bc01fe7577285ecc1803e4dac4832ec6e7a7724a89351dbf799d43d6a"
 assert_log_not_contains "upgrade --install"
 
+setup "kargo-install: a verified chart is cached for re-runs"
+kargo_run kargo-install.sh
+assert_rc 0
+assert_log_contains " pull oci://ghcr.io/akuity/kargo-charts/kargo"
+if cmp -s "$KARGO_FAKE_CHART" "$CACHE_DIR/kargo-1.12.1.tgz"; then ok; else fail "chart not cached"; fi
+: > "$STUB_LOG"
+kargo_run kargo-install.sh
+assert_rc 0
+assert_out_contains "Using the cached Kargo chart"
+assert_log_not_contains " pull "
+assert_log_contains "upgrade --install kargo $CACHE_DIR/kargo-1.12.1.tgz"
+
+setup "kargo-install: a corrupted cached chart is pulled again"
+mkdir -p "$CACHE_DIR"
+printf 'corrupted\n' > "$CACHE_DIR/kargo-1.12.1.tgz"
+kargo_run kargo-install.sh
+assert_rc 0
+assert_log_contains " pull oci://ghcr.io/akuity/kargo-charts/kargo"
+if cmp -s "$KARGO_FAKE_CHART" "$CACHE_DIR/kargo-1.12.1.tgz"; then ok; else fail "corrupted cache not replaced"; fi
+
+setup "kargo-install: a re-pushed chart is not cached"
+run STUB_CHART_FILE="$KARGO_FAKE_CHART" kargo-install.sh
+assert_rc 1
+if [ ! -e "$CACHE_DIR/kargo-1.12.1.tgz" ]; then ok; else fail "unverified chart was cached"; fi
+
+setup "kargo-install: an unpacked chart directory gets a clear error"
+kargo_run KARGO_CHART="$WORK/case" kargo-install.sh
+assert_rc 1
+assert_out_contains "is a directory; give a packaged chart"
+assert_out_not_contains "not the pinned release"
+
 setup "kargo-install: a Helm repo chart reference is pulled at the pinned version"
 kargo_run KARGO_CHART=mirror/kargo kargo-install.sh
 assert_rc 0
@@ -462,6 +500,22 @@ run databases-install.sh
 assert_rc 1
 assert_out_contains "line(s) 2 must be KEY=value"
 assert_out_not_contains "p@ss"
+assert_log_not_contains "create secret"
+
+setup "databases-install: accepts quoted values in the credentials file"
+mkdir -p "$SECRETS_DIR"
+printf '%s\n' 'POSTGRES_PASSWORD="pg1"' "REDIS_PASSWORD='rd1'" > "$SECRETS_DIR/databases.env"
+run databases-install.sh
+assert_rc 0
+assert_log_contains "CONTENT secret postgres-credentials password=pg1"
+assert_log_contains "CONTENT secret redis-credentials password=rd1"
+
+setup "databases-install: explains CRLF line endings"
+mkdir -p "$SECRETS_DIR"
+printf 'POSTGRES_PASSWORD=pg\r\n' > "$SECRETS_DIR/databases.env"
+run databases-install.sh
+assert_rc 1
+assert_out_contains "Windows (CRLF) line endings"
 assert_log_not_contains "create secret"
 
 setup "databases-install: refuses to pair new passwords with existing volumes"

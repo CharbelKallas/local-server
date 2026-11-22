@@ -1,5 +1,5 @@
 # shellcheck shell=sh
-# Globals set here (PINNED_MANIFEST, ...) are read by the sourcing script.
+# Globals set here (PINNED_FILE, ...) are read by the sourcing script.
 # shellcheck disable=SC2034
 # Shared helpers for the scripts in this directory. Source it, don't run it:
 #
@@ -14,11 +14,13 @@
 #   VM_NAME       Lima instance name          (default: k3s)
 #   KUBE_CONTEXT  kubeconfig context to use   (default: k3s-lab)
 #   SECRETS_DIR   where generated credentials live (default: <repo>/secrets)
+#   CACHE_DIR     verified downloads kept for re-runs (default: <repo>/.cache)
 
 VM_NAME="${VM_NAME:-k3s}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-k3s-lab}"
 REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 SECRETS_DIR="${SECRETS_DIR:-$REPO_ROOT/secrets}"
+CACHE_DIR="${CACHE_DIR:-$REPO_ROOT/.cache}"
 
 die() {
   echo "$*" >&2
@@ -62,29 +64,32 @@ gen_secret() {
   openssl rand -base64 48 | tr -d '=+/\n' | head -c "${1:-32}"
 }
 
-# sha256 of file $1 (sha256sum on Linux, shasum on macOS).
+# sha256 of file $1 (sha256sum on Linux, shasum on macOS). Dies if the
+# file cannot be hashed, so a failure never reads as an empty hash.
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
+    hash_out=$(sha256sum "$1") || die "Could not compute the sha256 of '$1'."
   elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}'
+    hash_out=$(shasum -a 256 "$1") || die "Could not compute the sha256 of '$1'."
   else
     die "Neither sha256sum nor shasum found: cannot verify downloads."
   fi
+  echo "${hash_out%% *}"
 }
 
-# use_pinned_manifest <source> <sha256> <variable name>
-# Sets PINNED_MANIFEST to a local file whose sha256 is the pinned one, and
-# dies otherwise. Used for every downloaded artifact (manifests, the K3s
-# installer, the Kargo chart). <source> is the default release URL or an override (a
-# local file, or another https URL such as a mirror). A URL is downloaded
-# to $PINNED_TMP first (callers remove it on exit), over https only — also
-# for redirects — because the result is applied with cluster-admin rights.
+# use_pinned_download <source> <sha256> <variable name>
+# Sets PINNED_FILE to a local file whose sha256 is the pinned one, and dies
+# otherwise. Used for every downloaded artifact: the Argo CD and
+# cert-manager manifests, the K3s installer and the Kargo chart package.
+# <source> is the default release URL or an override (a local file, or
+# another https URL such as a mirror). A URL is downloaded to $PINNED_TMP
+# first (callers remove it on exit), over https only — also for redirects —
+# because the result runs as root or is applied with cluster-admin rights.
 # Comparing the whole file's hash (not a version string inside it) means a
 # modified copy, another release, or a re-tagged upstream file is refused.
-PINNED_MANIFEST=""
+PINNED_FILE=""
 PINNED_TMP=""
-use_pinned_manifest() {
+use_pinned_download() {
   src=$1 sha=$2 var=$3
   case "$src" in
     https://*)
@@ -96,16 +101,18 @@ use_pinned_manifest() {
       ;;
     *://*) die "$var '$src': only https:// URLs are allowed." ;;
     *)
-      [ -r "$src" ] || die "$var '$src' is not a readable file."
+      if [ ! -f "$src" ] || [ ! -r "$src" ]; then
+        die "$var '$src' is not a readable file."
+      fi
       file=$src
       ;;
   esac
-  # Assigned on its own line so a failure (no hash tool) stops `set -e`
-  # callers instead of reading as an empty, "mismatching" hash.
+  # Assigned on its own line so a failure (no hash tool, unreadable file)
+  # stops `set -e` callers instead of reading as a "mismatching" hash.
   actual=$(sha256_of "$file")
   [ "$actual" = "$sha" ] \
     || die "$var '$src' has sha256 $actual, expected $sha (not the pinned release, or modified)."
-  PINNED_MANIFEST=$file
+  PINNED_FILE=$file
 }
 
 # Forget database credentials inherited from the caller's environment, so
@@ -119,11 +126,16 @@ clear_db_credentials() {
 
 # Database credentials end up in a shell-sourced file, space-separated
 # redis.conf lines and a mongodb:// URI, so they are limited to characters
-# that are literal in all three (RFC 3986 "unreserved"). Generated values
-# are alphanumeric; this catches hand-edited ones. Prints no values.
+# that are literal in all three (RFC 3986 "unreserved"), optionally inside
+# matching quotes. Generated values are alphanumeric; this catches
+# hand-edited ones. Prints line numbers, never values.
 check_db_credentials_file() {
-  bad=$(grep -nvE '^(#.*|[A-Z_][A-Z0-9_]*=[A-Za-z0-9._~-]*)?$' "$1" | cut -d: -f1 | tr '\n' ' ')
-  [ -z "$bad" ] || die "$1: line(s) ${bad% } must be KEY=value with values made of A-Z a-z 0-9 . _ ~ - only."
+  if grep -q "$(printf '\r')" "$1"; then
+    die "$1 has Windows (CRLF) line endings, which would end up inside the passwords. Convert it: tr -d '\\r' < '$1' > '$1.new' && mv '$1.new' '$1'"
+  fi
+  set_='[A-Za-z0-9._~-]*'
+  bad=$(grep -nvE "^(#.*|[A-Z_][A-Z0-9_]*=($set_|\"$set_\"|'$set_'))?\$" "$1" | cut -d: -f1 | tr '\n' ' ')
+  [ -z "$bad" ] || die "$1: line(s) ${bad% } must be KEY=value with values made of A-Z a-z 0-9 . _ ~ - only (optionally in quotes)."
 }
 
 # Same for the Kargo admin credentials (secrets/kargo-admin.env).

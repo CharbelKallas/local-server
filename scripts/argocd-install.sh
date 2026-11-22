@@ -24,8 +24,8 @@ require_cluster
 # download). Whatever the source, it must hash to ARGOCD_MANIFEST_SHA256.
 trap 'rm -f "$PINNED_TMP"' EXIT
 trap 'exit 130' INT TERM
-use_pinned_manifest "${ARGOCD_MANIFEST:-$DEFAULT_MANIFEST}" "$ARGOCD_MANIFEST_SHA256" ARGOCD_MANIFEST
-MANIFEST=$PINNED_MANIFEST
+use_pinned_download "${ARGOCD_MANIFEST:-$DEFAULT_MANIFEST}" "$ARGOCD_MANIFEST_SHA256" ARGOCD_MANIFEST
+MANIFEST=$PINNED_FILE
 
 echo "Creating namespace '$NAMESPACE' (if missing)..."
 kc create namespace "$NAMESPACE" --dry-run=client -o yaml | kc apply -f -

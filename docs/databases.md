@@ -193,9 +193,10 @@ role and the MongoDB user, rewrites Redis's ACL (and restarts Redis), and
 refreshes `hello-devops-db-credentials` in the app namespaces; restart the
 application pods so they pick up the new Secret.
 
-Values in `secrets/databases.env` may use only `A-Z a-z 0-9 . _ ~ -`
-(they end up in a shell-sourced file, `redis.conf` and a `mongodb://`
-URI); `make databases-install` refuses other characters and names the
+Values in `secrets/databases.env` may use only `A-Z a-z 0-9 . _ ~ -`,
+optionally inside matching quotes (they end up in a shell-sourced file,
+`redis.conf` and a `mongodb://` URI). `make databases-install` refuses
+other characters, and Windows (CRLF) line endings, and names the
 offending line.
 
 ### Upgrading from the No-Auth Setup

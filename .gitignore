@@ -15,6 +15,9 @@
 .env.local
 .env.*.local
 
+# Verified downloads (scripts/lib.sh CACHE_DIR)
+.cache/
+
 # Secrets
 *.pem
 *.key
