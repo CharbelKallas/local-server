@@ -267,6 +267,14 @@ assert_rc 1
 assert_out_contains "is not a readable file"
 assert_out_not_contains "not the pinned release"
 
+setup "argocd-install: a path with a backslash is hashed correctly"
+STUB_NODEPORT=30080
+mkdir -p "$WORK/case/a\\b"
+printf 'kind: List\n' > "$WORK/case/a\\b/install.yaml"
+run SCRIPTS="$(sha_pinned_scripts argocd-install.sh ARGOCD_MANIFEST_SHA256 "$WORK/case/a\\b/install.yaml")" \
+  ARGOCD_MANIFEST="$WORK/case/a\\b/install.yaml" argocd-install.sh
+assert_rc 0
+
 setup "argocd-install: refuses a plain http:// override"
 run ARGOCD_MANIFEST=http://mirror.example/install.yaml argocd-install.sh
 assert_rc 1
@@ -386,6 +394,13 @@ assert_rc 0
 assert_out_contains "Using the cached Kargo chart"
 assert_log_not_contains " pull "
 assert_log_contains "upgrade --install kargo $CACHE_DIR/kargo-1.12.1.tgz"
+
+setup "kargo-install: leaves no cache temp files behind"
+kargo_run kargo-install.sh
+assert_rc 0
+leftover=""
+for f in "$CACHE_DIR"/*.tgz.*; do [ -e "$f" ] && leftover="$f"; done
+if [ -z "$leftover" ]; then ok; else fail "cache temp file left behind: $leftover"; fi
 
 setup "kargo-install: a corrupted cached chart is pulled again"
 mkdir -p "$CACHE_DIR"
@@ -510,13 +525,25 @@ assert_rc 0
 assert_log_contains "CONTENT secret postgres-credentials password=pg1"
 assert_log_contains "CONTENT secret redis-credentials password=rd1"
 
+setup "databases-install: accepts export, indentation and trailing comments"
+mkdir -p "$SECRETS_DIR"
+printf '%s\n' '# lab credentials' 'export POSTGRES_PASSWORD=pg2' '  REDIS_PASSWORD="rd2"  # rotated' '' > "$SECRETS_DIR/databases.env"
+run databases-install.sh
+assert_rc 0
+assert_log_contains "CONTENT secret postgres-credentials password=pg2"
+assert_log_contains "CONTENT secret redis-credentials password=rd2"
+
 setup "databases-install: explains CRLF line endings"
 mkdir -p "$SECRETS_DIR"
 printf 'POSTGRES_PASSWORD=pg\r\n' > "$SECRETS_DIR/databases.env"
 run databases-install.sh
 assert_rc 1
 assert_out_contains "Windows (CRLF) line endings"
+assert_out_contains "(umask 077; tr -d"
 assert_log_not_contains "create secret"
+run databases-password.sh
+assert_rc 1
+assert_out_contains "Windows (CRLF) line endings"
 
 setup "databases-install: refuses to pair new passwords with existing volumes"
 STUB_PVCS="persistentvolumeclaim/postgres-data"

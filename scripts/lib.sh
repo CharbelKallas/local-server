@@ -65,12 +65,18 @@ gen_secret() {
 }
 
 # sha256 of file $1 (sha256sum on Linux, shasum on macOS). Dies if the
-# file cannot be hashed, so a failure never reads as an empty hash.
+# file cannot be hashed, so a failure never reads as an empty hash. The
+# file is hashed from stdin, so its path never appears in the output (GNU
+# sha256sum would otherwise escape a path with a backslash and prefix the
+# hash with "\").
 sha256_of() {
+  if [ ! -f "$1" ] || [ ! -r "$1" ]; then
+    die "Could not compute the sha256 of '$1': not a readable file."
+  fi
   if command -v sha256sum >/dev/null 2>&1; then
-    hash_out=$(sha256sum "$1") || die "Could not compute the sha256 of '$1'."
+    hash_out=$(sha256sum < "$1") || die "Could not compute the sha256 of '$1'."
   elif command -v shasum >/dev/null 2>&1; then
-    hash_out=$(shasum -a 256 "$1") || die "Could not compute the sha256 of '$1'."
+    hash_out=$(shasum -a 256 < "$1") || die "Could not compute the sha256 of '$1'."
   else
     die "Neither sha256sum nor shasum found: cannot verify downloads."
   fi
@@ -127,14 +133,17 @@ clear_db_credentials() {
 # Database credentials end up in a shell-sourced file, space-separated
 # redis.conf lines and a mongodb:// URI, so they are limited to characters
 # that are literal in all three (RFC 3986 "unreserved"), optionally inside
-# matching quotes. Generated values are alphanumeric; this catches
-# hand-edited ones. Prints line numbers, never values.
+# matching quotes. Anything else sh would accept around them is allowed:
+# indentation, `export`, trailing blanks and a ` # comment`. Generated
+# values are alphanumeric; this catches hand-edited ones. Prints line
+# numbers, never values.
 check_db_credentials_file() {
   if grep -q "$(printf '\r')" "$1"; then
-    die "$1 has Windows (CRLF) line endings, which would end up inside the passwords. Convert it: tr -d '\\r' < '$1' > '$1.new' && mv '$1.new' '$1'"
+    die "$1 has Windows (CRLF) line endings, which would end up inside the passwords. Convert it (keeping it private): (umask 077; tr -d '\\r' < '$1' > '$1.new') && mv '$1.new' '$1'"
   fi
   set_='[A-Za-z0-9._~-]*'
-  bad=$(grep -nvE "^(#.*|[A-Z_][A-Z0-9_]*=($set_|\"$set_\"|'$set_'))?\$" "$1" | cut -d: -f1 | tr '\n' ' ')
+  assign="(export[[:space:]]+)?[A-Z_][A-Z0-9_]*=($set_|\"$set_\"|'$set_')([[:space:]]+#.*)?"
+  bad=$(grep -nvE "^[[:space:]]*(#.*|$assign)?[[:space:]]*\$" "$1" | cut -d: -f1 | tr '\n' ' ')
   [ -z "$bad" ] || die "$1: line(s) ${bad% } must be KEY=value with values made of A-Z a-z 0-9 . _ ~ - only (optionally in quotes)."
 }
 

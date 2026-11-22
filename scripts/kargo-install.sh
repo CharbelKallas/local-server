@@ -58,8 +58,9 @@ require_cmd htpasswd
 tmp_cred=""
 values_file=""
 chart_dir=""
+cache_tmp=""
 cleanup() {
-  rm -f "$tmp_cred" "$values_file" "$PINNED_TMP"
+  rm -f "$tmp_cred" "$values_file" "$PINNED_TMP" "$cache_tmp"
   [ -z "$chart_dir" ] || rm -rf "$chart_dir"
 }
 trap cleanup EXIT
@@ -89,11 +90,14 @@ fi
 use_pinned_download "$chart_file" "$CHART_SHA256" KARGO_CHART
 chart_file=$PINNED_FILE
 if [ -n "$chart_dir" ]; then
-  # Only a verified package is cached (atomically, so an interrupted copy
-  # is never mistaken for a cached chart).
+  # Only a verified package is cached, atomically (an interrupted copy is
+  # never mistaken for a cached chart) and through a unique temp file, so
+  # concurrent installs cannot trip over each other.
   mkdir -p "$CACHE_DIR"
-  cp "$chart_file" "$CACHED_CHART.tmp"
-  mv "$CACHED_CHART.tmp" "$CACHED_CHART"
+  cache_tmp=$(mktemp "$CACHED_CHART.XXXXXX")
+  cp "$chart_file" "$cache_tmp"
+  mv "$cache_tmp" "$CACHED_CHART"
+  cache_tmp=""
 fi
 
 # --- cert-manager (dependency of Kargo's default configuration) ------------
