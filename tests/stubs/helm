@@ -2,6 +2,7 @@
 # Test stub for helm. Logs the call and, for --values files, their path
 # and contents (on CONTENT lines, kept apart from argv).
 echo "helm $*" >> "$STUB_LOG"
+. "$(dirname -- "$0")/env-leak-check.sh"
 # `pull`: "downloads" $STUB_CHART_FILE into the -d directory (no network).
 case " $* " in *" pull "*) is_pull=true ;; *) is_pull=false ;; esac
 if $is_pull; then

@@ -17,14 +17,33 @@ trap 'exit 130' INT TERM
 PATH="$REPO_ROOT/tests/stubs:$PATH"
 export PATH
 
+# Every credential key the scripts know (single source: scripts/lib.sh).
+# shellcheck disable=SC2016  # expanded by that shell
+CREDENTIAL_KEYS=$(sh -c '. "$1" && echo $DB_CREDENTIAL_KEYS $KARGO_CREDENTIAL_KEYS' \
+  sh "$SCRIPTS/lib.sh")
+[ -n "$CREDENTIAL_KEYS" ] || { echo "could not read the credential keys from scripts/lib.sh" >&2; exit 1; }
+
 PASS=0
 FAIL=0
 CURRENT=""
 
 # --- tiny test framework ------------------------------------------------------
 
+# A credential in a stub's environment (an ENV_LEAK line, see
+# tests/stubs/env-leak-check.sh) fails the test that caused it. The stubs
+# record leaks in their own file too, because tests truncate STUB_LOG.
+STUB_LEAK_LOG="$WORK/env-leaks.log"
+export STUB_LEAK_LOG
+check_env_leaks() {
+  if [ -s "$STUB_LEAK_LOG" ]; then
+    fail "credentials leaked into a child process's environment: $(sort -u "$STUB_LEAK_LOG" | tr '\n' ' ')"
+    : > "$STUB_LEAK_LOG"
+  fi
+}
+
 # Fresh, isolated state for each test.
 setup() {
+  check_env_leaks
   CURRENT=$1
   rm -rf "$WORK/case"
   mkdir -p "$WORK/case"
@@ -45,6 +64,10 @@ setup() {
   unset STUB_PVC_RC STUB_APPLY_ACTION STUB_JOB_STATE STUB_SECRET_B64 STUB_K3S_INSTALLED \
     STUB_K3S_ACTIVE STUB_CURL_FILE KUBE_CONTEXT DB_APP_NAMESPACES ARGOCD_MANIFEST \
     KARGO_CHART CERT_MANAGER_MANIFEST STUB_CERT_MANAGER_MISSING STUB_CERT_MANAGER_ERROR STUB_CHART_FILE
+  # Credentials exported in the developer's shell would trip the ENV_LEAK
+  # check in scripts that never touch them.
+  # shellcheck disable=SC2086  # one key per word
+  unset $CREDENTIAL_KEYS
 }
 
 fail() {
@@ -451,6 +474,17 @@ run kargo-password.sh
 assert_rc 0
 assert_out_contains "Kargo admin password: $KARGO_ADMIN_PASSWORD"
 
+setup "kargo-install: exported Kargo credentials stay out of helm's environment"
+kargo_run kargo-install.sh
+assert_rc 0
+sed 's/^/export /' "$SECRETS_DIR/kargo-admin.env" > "$WORK/case/k.env"
+cat "$WORK/case/k.env" > "$SECRETS_DIR/kargo-admin.env"
+: > "$STUB_LOG"
+kargo_run kargo-install.sh
+assert_rc 0
+assert_log_contains "upgrade --install kargo"
+assert_log_not_contains "ENV_LEAK"
+
 setup "kargo-password: a missing password is not taken from the environment"
 mkdir -p "$SECRETS_DIR"
 printf "KARGO_TOKEN_SIGNING_KEY=k\n" > "$SECRETS_DIR/kargo-admin.env"
@@ -752,6 +786,7 @@ assert_out_contains "K3s is not running"
 
 # --- summary ------------------------------------------------------------------
 
+check_env_leaks
 echo
 echo "scripts_test: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

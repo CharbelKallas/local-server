@@ -46,6 +46,7 @@ CHART="${KARGO_CHART:-oci://ghcr.io/akuity/kargo-charts/kargo}"
 DEFAULT_CERT_MANAGER_MANIFEST="https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER_VERSION/cert-manager.yaml"
 CRED_FILE="$SECRETS_DIR/kargo-admin.env"
 
+clear_kargo_credentials
 require_cluster
 require_cmd helm "Install it first (e.g. brew install helm)."
 require_cmd openssl
@@ -155,9 +156,7 @@ else
 fi
 chmod 600 "$CRED_FILE"
 
-clear_kargo_credentials
-# shellcheck disable=SC1090
-. "$CRED_FILE"
+load_kargo_credentials "$CRED_FILE"
 
 if [ -z "${KARGO_ADMIN_PASSWORD_HASH:-}" ] || [ -z "${KARGO_TOKEN_SIGNING_KEY:-}" ]; then
   die "Invalid credentials file: $CRED_FILE (delete it and re-run)."

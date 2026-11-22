@@ -24,6 +24,7 @@ APP_NAMESPACES="${DB_APP_NAMESPACES:-hello-devops-dev hello-devops-staging}"
 APP_SECRET="hello-devops-db-credentials"
 USERS_JOB="hello-devops-db-users"
 
+clear_db_credentials
 require_cluster
 require_cmd openssl
 
@@ -37,7 +38,6 @@ trap 'exit 130' INT TERM
 
 # --- credentials (generated once, reused on re-runs) -----------------------
 ensure_secrets_dir
-clear_db_credentials
 fresh_credentials=true
 tmp_cred=$(mktemp "$CRED_FILE.XXXXXX")
 if [ -f "$CRED_FILE" ]; then
